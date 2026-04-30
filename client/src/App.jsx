@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useEffectEvent, useMemo, useState } from 'react'
+import { startTransition, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { geoEqualEarth, geoGraticule10, geoMercator, geoPath } from 'd3-geo'
 import { feature } from 'topojson-client'
 import worldAtlas from 'world-atlas/countries-110m.json'
@@ -30,6 +30,7 @@ const ARCHIVE_DIVERGENCE_HEIGHT = 180
 const ARCHIVE_CHART_MARGIN = { top: 16, right: 18, bottom: 28, left: 44 }
 const ARCHIVE_CHART_MOBILE_MARGIN = { top: 18, right: 16, bottom: 42, left: 54 }
 const EMERGENCY_LEVEL_COUNT = 5
+const EMERGENCY_SCHEME_TAP_WINDOW_MS = 700
 const AIRCRAFT_MODEL_DETAIL_RANK_LIMIT = 40
 const AIRCRAFT_MODEL_WIKIPEDIA_URLS = new Map([
   ['BOMBARDIER AEROSPACE INC BD-100-1A10', 'https://en.wikipedia.org/wiki/Bombardier_Challenger_300'],
@@ -137,6 +138,13 @@ function formatSigned(value) {
   }
 
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)}σ`
+}
+
+function getEmergencyLevel(signal) {
+  return Math.min(
+    EMERGENCY_LEVEL_COUNT,
+    Math.max(1, Math.round(Number(signal?.emergencyLevel || 1))),
+  )
 }
 
 function roundDateToNearestHalfHour(value) {
@@ -937,18 +945,39 @@ function createUnitedStatesProjection() {
     .translate([MAP_WIDTH / 2, MAP_HEIGHT / 2 + 24])
 }
 
-function EmergencySummary({ signal, latestSweep, actualCount, expectedCount, trackedCount, maxSeatsAirborneEstimate }) {
+function EmergencySummary({
+  signal,
+  latestSweep,
+  actualCount,
+  expectedCount,
+  trackedCount,
+  maxSeatsAirborneEstimate,
+  onEmergencyLevelTap,
+}) {
   const sigmaShift = signal?.sigmaShift ?? signal?.zScore ?? 0
   const deviationCount = Number(actualCount || 0) - Number(expectedCount || 0)
-  const emergencyLevel = Math.min(
-    EMERGENCY_LEVEL_COUNT,
-    Math.max(1, Math.round(Number(signal?.emergencyLevel || 1))),
-  )
+  const emergencyLevel = getEmergencyLevel(signal)
 
   return (
     <section className={`panel dial-panel emergency-level-${emergencyLevel}`}>
       <div className="panel-header">
-        <div><h2>Emergency level {emergencyLevel}/5</h2></div>
+        <div>
+          <h2>
+            <button
+              type="button"
+              className="emergency-level-trigger"
+              onClick={onEmergencyLevelTap}
+              onMouseDown={(event) => {
+                if (event.detail > 1) {
+                  event.preventDefault()
+                }
+              }}
+              aria-label={`Emergency level ${emergencyLevel} of 5`}
+            >
+              Emergency level {emergencyLevel}/5
+            </button>
+          </h2>
+        </div>
       </div>
       <div className="summary-text-block">
         <p className="summary-count-line">
@@ -1500,6 +1529,11 @@ function AboutSystemCard() {
           </a>
           .
         </p>
+        <p>
+          <a href="https://github.com/kylemcdonald/ews" target="_blank" rel="noreferrer">
+            GitHub
+          </a>
+        </p>
       </div>
     </section>
   )
@@ -1526,6 +1560,8 @@ function App() {
   const [dashboard, setDashboard] = useState(null)
   const [error, setError] = useState(null)
   const [backgroundReady, setBackgroundReady] = useState(false)
+  const [manualEmergencySchemeEnabled, setManualEmergencySchemeEnabled] = useState(false)
+  const emergencySchemeTapTimesRef = useRef([])
 
   const applyDashboard = useEffectEvent((nextDashboard) => {
     startTransition(() => {
@@ -1533,6 +1569,23 @@ function App() {
       setError(null)
     })
   })
+
+  function handleEmergencyLevelTap() {
+    const now = window.performance?.now ? window.performance.now() : Date.now()
+    const recentTapTimes = emergencySchemeTapTimesRef.current.filter(
+      (tapTime) => now - tapTime <= EMERGENCY_SCHEME_TAP_WINDOW_MS,
+    )
+
+    recentTapTimes.push(now)
+
+    if (recentTapTimes.length >= 3) {
+      emergencySchemeTapTimesRef.current = []
+      setManualEmergencySchemeEnabled((enabled) => !enabled)
+      return
+    }
+
+    emergencySchemeTapTimesRef.current = recentTapTimes
+  }
 
   async function requestDashboard() {
     const response = await fetch(buildDashboardRequestUrl(), {
@@ -1613,6 +1666,18 @@ function App() {
     }
   }, [dashboard, error, shouldShowLoading])
 
+  const currentSignal = dashboard?.signals?.composite ?? dashboard?.current ?? null
+  const currentEmergencyLevel = getEmergencyLevel(currentSignal)
+  const emergencySchemeActive = manualEmergencySchemeEnabled || currentEmergencyLevel === EMERGENCY_LEVEL_COUNT
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('emergency-color-scheme', emergencySchemeActive)
+
+    return () => {
+      document.documentElement.classList.remove('emergency-color-scheme')
+    }
+  }, [emergencySchemeActive])
+
   let content = null
 
   if (error && !dashboard) {
@@ -1637,6 +1702,7 @@ function App() {
       expectedConcurrentStdDev: dashboard.current?.baselineStdDev,
       sigmaShift: dashboard.current?.zScore,
       alertLevel: dashboard.current?.alertLevel,
+      emergencyLevel: dashboard.current?.emergencyLevel,
     }
     const maxSeatsAirborneEstimate = estimateMaxSeatsAirborne(liveAircraft, compositeSignal.actualConcurrentCount)
 
@@ -1684,6 +1750,7 @@ function App() {
               expectedCount={compositeSignal.expectedConcurrentCount}
               trackedCount={dashboard.cohort?.trackedCount ?? dashboard.watchlist?.trackedCount}
               maxSeatsAirborneEstimate={maxSeatsAirborneEstimate}
+              onEmergencyLevelTap={handleEmergencyLevelTap}
             />
           </div>
         </section>

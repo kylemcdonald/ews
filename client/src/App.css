@@ -137,6 +137,23 @@
   height: 128px;
 }
 
+html.emergency-color-scheme,
+html.emergency-color-scheme body {
+  background: #000000;
+  color: #ffffff;
+}
+
+html.emergency-color-scheme .background-wallpaper,
+html.emergency-color-scheme .app-shell,
+html.emergency-color-scheme .loading-screen {
+  filter: invert(1);
+}
+
+/* The page is filtered after paint, so cyan source text renders as red. */
+html.emergency-color-scheme .app-shell :is(h1, h2, .chart-subsection-header strong, .map-hover-header strong) {
+  color: #00ffff !important;
+}
+
 .dial-stack {
   display: grid;
   gap: 16px;
@@ -182,6 +199,24 @@
   --emergency-bg: #b91c1c;
   --emergency-border: #7f1d1d;
   --emergency-text: #ffffff;
+}
+
+.emergency-level-trigger {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.emergency-level-trigger:focus-visible {
+  outline: 1px dotted currentColor;
+  outline-offset: 3px;
 }
 
 .provider-toggle:hover:not(:disabled) {
