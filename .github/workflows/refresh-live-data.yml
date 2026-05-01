@@ -17,6 +17,8 @@ env:
   TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
   PUBLIC_BUCKET: ews-public
   STATE_BUCKET: ews-state
+  EWS_PUBLIC_URL: https://ews.kylemcdonald.net/
+  EWS_RSS_URL: https://ews.kylemcdonald.net/rss.xml
 
 concurrency:
   group: refresh-live-data
@@ -71,6 +73,14 @@ jobs:
       - name: Send Telegram emergency alert
         run: node scripts/send_telegram_alert.js
 
+      - name: Update RSS feed
+        id: rss
+        run: |
+          RSS_RESULT="$(node scripts/update_rss_feed.js --output tmp/rss.xml)"
+          echo "$RSS_RESULT"
+          RSS_UPDATED="$(node -e 'const data = JSON.parse(process.argv[1]); process.stdout.write(data.updated ? "true" : "false")' "$RSS_RESULT")"
+          echo "updated=${RSS_UPDATED}" >> "$GITHUB_OUTPUT"
+
       - name: Upload deployment state
         run: |
           for attempt in 1 2 3 4 5; do
@@ -83,6 +93,31 @@ jobs:
             fi
             sleep $((attempt * 15))
           done
+
+      - name: Publish RSS feed
+        if: steps.rss.outputs.updated == 'true'
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if npx wrangler r2 object put "${PUBLIC_BUCKET}/rss.xml" \
+              --file tmp/rss.xml \
+              --remote \
+              --content-type application/rss+xml \
+              --cache-control "public, max-age=300"; then
+              exit 0
+            fi
+            echo "R2 RSS publish attempt ${attempt} failed."
+            if [ "$attempt" -eq 5 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+
+      - name: Deploy updated RSS endpoint
+        if: steps.rss.outputs.updated == 'true'
+        run: |
+          npm run build
+          cp tmp/rss.xml client/dist/rss.xml
+          npx wrangler pages deploy client/dist --project-name apocalypse-ews --branch main --commit-hash "$GITHUB_SHA"
 
       - name: Publish live snapshot
         run: |

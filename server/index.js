@@ -14,6 +14,7 @@ const {
 const { createHeatmapCacheRefresher } = require("./heatmap-cache");
 const { buildDashboardSnapshot } = require("./dashboard");
 const { maybeSendEmergencyLevelTelegramAlert } = require("./telegram-alert");
+const { buildEmergencyRssFeedXml, maybeRecordEmergencyLevelRssItem } = require("./rss-feed");
 
 loadEnvFile();
 
@@ -102,19 +103,30 @@ const heatmapRefresher = createHeatmapCacheRefresher({
 
     void dashboardSnapshotManager
       .refresh({ reason: "heatmap_refresh" })
-      .then((snapshot) =>
-        maybeSendEmergencyLevelTelegramAlert({
+      .then(async (snapshot) => {
+        const status = heatmapRefresher.getStatus();
+        const rssResult = maybeRecordEmergencyLevelRssItem({
           snapshot,
-          status: heatmapRefresher.getStatus(),
-        }),
-      )
-      .then((result) => {
-        if (result?.sent) {
-          console.log(`Telegram emergency alert sent for ${result.latestSlotKey || "latest heatmap"}.`);
+          status,
+        });
+        const telegramResult = await maybeSendEmergencyLevelTelegramAlert({
+          snapshot,
+          status,
+        });
+
+        return { rssResult, telegramResult };
+      })
+      .then(({ rssResult, telegramResult }) => {
+        if (rssResult?.updated) {
+          console.log(`RSS emergency alert recorded for ${rssResult.latestSlotKey || "latest heatmap"}.`);
+        }
+
+        if (telegramResult?.sent) {
+          console.log(`Telegram emergency alert sent for ${telegramResult.latestSlotKey || "latest heatmap"}.`);
         }
       })
       .catch((error) => {
-        console.error("Telegram emergency alert failed:", error);
+        console.error("Emergency alert handling failed:", error);
       });
   },
 });
@@ -149,6 +161,13 @@ app.get("/api/dashboard", (_request, response) => {
   }
 
   response.json(snapshot);
+});
+
+app.get(["/rss.xml", "/feed.xml"], (_request, response) => {
+  response
+    .type("application/rss+xml")
+    .set("Cache-Control", "public, max-age=300")
+    .send(buildEmergencyRssFeedXml());
 });
 
 if (fs.existsSync(CLIENT_DIST_DIR)) {

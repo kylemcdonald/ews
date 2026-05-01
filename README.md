@@ -79,6 +79,7 @@ npm run import:faa
 npm run seed:demo
 npm run update:daily
 npm run export:snapshot
+npm run rss:update
 npm run telegram:alert
 ```
 
@@ -129,3 +130,9 @@ https://ews.kylemcdonald.net/
 ```
 
 The last alerted heatmap slot is stored in SQLite so the same slot is not reposted after a restart or retry. Run `npm run telegram:alert -- --dry-run` to verify the current alert decision without posting.
+
+### RSS emergency feed
+
+The Node server exposes the same level-5 alert stream at `/rss.xml` and `/feed.xml`. The public static deployment also includes `/rss.xml`. Scheduled refresh workflows update that feed only when a new heatmap slot reaches emergency level 5, then publish the new RSS file to R2 and redeploy the Pages endpoint.
+
+Run `npm run rss:update -- --dry-run --output tmp/rss.xml` to verify the current RSS decision without recording a new feed item.

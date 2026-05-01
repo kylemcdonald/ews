@@ -19,6 +19,8 @@ env:
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   PUBLIC_BUCKET: ews-public
+  EWS_PUBLIC_URL: https://ews.kylemcdonald.net/
+  EWS_RSS_URL: https://ews.kylemcdonald.net/rss.xml
 
 concurrency:
   group: deploy-pages
@@ -44,6 +46,9 @@ jobs:
 
       - name: Apply public snapshot CORS
         run: npx wrangler r2 bucket cors set "${PUBLIC_BUCKET}" --file config/r2.public.cors.json
+
+      - name: Restore current RSS feed
+        run: npx wrangler r2 object get "${PUBLIC_BUCKET}/rss.xml" --file client/public/rss.xml --remote || true
 
       - name: Build client
         run: npm run build

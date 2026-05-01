@@ -19,6 +19,7 @@
     "backfill": "python3 scripts/backfill_history.py",
     "update:daily": "python3 scripts/backfill_history.py --relative-days 1",
     "export:snapshot": "node scripts/export_dashboard_snapshot.js",
+    "rss:update": "node scripts/update_rss_feed.js",
     "telegram:alert": "node scripts/send_telegram_alert.js",
     "lint": "npm run lint --workspace client"
   },

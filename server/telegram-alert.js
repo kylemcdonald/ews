@@ -180,6 +180,8 @@ module.exports = {
   TELEGRAM_ALERT_LAST_SLOT_META_KEY,
   formatEmergencyLevelAlert,
   getTelegramAlertConfig,
+  getEmergencySnapshotSignal,
+  getLatestSlotKey,
   maybeSendEmergencyLevelTelegramAlert,
   normalizeTelegramChannel,
   sendTelegramMessage,
