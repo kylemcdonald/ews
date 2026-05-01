@@ -48,10 +48,22 @@ jobs:
         run: npx wrangler r2 bucket cors set "${PUBLIC_BUCKET}" --file config/r2.public.cors.json
 
       - name: Restore current RSS feed
-        run: npx wrangler r2 object get "${PUBLIC_BUCKET}/rss.xml" --file client/public/rss.xml --remote || true
+        run: |
+          mkdir -p tmp
+          if npx wrangler r2 object get "${PUBLIC_BUCKET}/rss.xml" --file tmp/current-rss.xml --remote; then
+            cp tmp/current-rss.xml client/public/rss.xml
+          fi
 
       - name: Build client
         run: npm run build
+
+      - name: Publish RSS feed backup
+        run: |
+          npx wrangler r2 object put "${PUBLIC_BUCKET}/rss.xml" \
+            --file client/dist/rss.xml \
+            --remote \
+            --content-type application/rss+xml \
+            --cache-control "public, max-age=300"
 
       - name: Deploy to Cloudflare Pages
         run: npx wrangler pages deploy client/dist --project-name apocalypse-ews --branch main --commit-hash "$GITHUB_SHA"
