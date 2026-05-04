@@ -34,9 +34,21 @@ const CONCURRENT_CALENDAR_DISTANCE_SCALE_DAYS = 2.5;
 const CONCURRENT_CALENDAR_HALF_LIFE_DAYS = 366 * 2;
 const CONCURRENT_CALENDAR_WEEKDAY_MISMATCH_WEIGHT = 0.6;
 const CONCURRENT_CALENDAR_SHRINKAGE = 2;
+const CONCURRENT_ANNUAL_RATIO_MODEL = "smoothed-prior-year-ratio";
+const CONCURRENT_ANNUAL_RATIO_TIME_ZONE = "America/Los_Angeles";
+const CONCURRENT_ANNUAL_RATIO_YEAR_LOOKBACK = 3;
+const CONCURRENT_ANNUAL_RATIO_DAY_RADIUS = 2;
+const CONCURRENT_ANNUAL_RATIO_SLOT_RADIUS = 5;
+const CONCURRENT_ANNUAL_RATIO_DAY_SIGMA = 1.25;
+const CONCURRENT_ANNUAL_RATIO_SLOT_SIGMA = 3.125;
+const CONCURRENT_ANNUAL_RATIO_YEAR_HALF_LIFE = 2;
+const CONCURRENT_ANNUAL_RATIO_SHRINKAGE = 1;
+const CONCURRENT_ANNUAL_RATIO_MIN = 0.25;
+const CONCURRENT_ANNUAL_RATIO_MAX = 2.25;
 const MIN_ALARM_SIGMA_THRESHOLD = 4;
 const DEFAULT_ALARM_SIGMA_THRESHOLD = 7;
 const ARCHIVE_DECIMAL_PLACES = 2;
+const timeZonePartFormatters = new Map();
 
 function mean(values) {
   const finiteValues = values.filter((value) => Number.isFinite(value));
@@ -223,6 +235,75 @@ function getDayOfYearFromIso(referenceIso) {
   return Math.floor((dayStart - yearStart) / DAY_MS);
 }
 
+function getTimeZonePartFormatter(timeZone) {
+  const resolvedTimeZone = timeZone || "UTC";
+  if (!timeZonePartFormatters.has(resolvedTimeZone)) {
+    timeZonePartFormatters.set(
+      resolvedTimeZone,
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: resolvedTimeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }),
+    );
+  }
+
+  return timeZonePartFormatters.get(resolvedTimeZone);
+}
+
+function getTimeZoneCalendarParts(referenceIso, timeZone) {
+  const formatter = getTimeZonePartFormatter(timeZone);
+  const parts = {};
+  for (const part of formatter.formatToParts(new Date(referenceIso))) {
+    if (part.type !== "literal") {
+      parts[part.type] = Number(part.value);
+    }
+  }
+
+  const hour = parts.hour === 24 ? 0 : parts.hour;
+  const minute = parts.minute >= 30 ? 30 : 0;
+  const slot = hour * 2 + (minute >= 30 ? 1 : 0);
+
+  return {
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+    hour,
+    minute,
+    slot,
+  };
+}
+
+function buildLocalDateSlotKey(year, month, day, slot) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}-${String(
+    normalizeSlot(slot),
+  ).padStart(2, "0")}`;
+}
+
+function buildLocalPartsSlotKey(parts) {
+  return buildLocalDateSlotKey(parts.year, parts.month, parts.day, parts.slot);
+}
+
+function buildOffsetLocalPartsSlotKey(parts, yearOffset, dayOffset, slotOffset) {
+  const offsetSlot = parts.slot + slotOffset;
+  const dayCarry = Math.floor(offsetSlot / 48);
+  const normalizedSlot = normalizeSlot(offsetSlot);
+  const date = new Date(
+    Date.UTC(parts.year - yearOffset, parts.month - 1, parts.day + dayOffset + dayCarry),
+  );
+
+  return buildLocalDateSlotKey(
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    date.getUTCDate(),
+    normalizedSlot,
+  );
+}
+
 function getNeighborSlots(slot) {
   return [normalizeSlot(slot - 1), normalizeSlot(slot), normalizeSlot(slot + 1)];
 }
@@ -398,6 +479,74 @@ function buildCalendarResidualAdjustment(state, referenceIso, referenceTimestamp
   };
 }
 
+function buildAnnualRatioAdjustment(state, referenceIso, baseExpectedConcurrentCount, options = {}) {
+  if (
+    options.concurrentPredictionModel !== CONCURRENT_ANNUAL_RATIO_MODEL ||
+    !Number.isFinite(baseExpectedConcurrentCount) ||
+    baseExpectedConcurrentCount <= 0
+  ) {
+    return null;
+  }
+
+  const referenceParts = getTimeZoneCalendarParts(
+    referenceIso,
+    options.annualRatioTimeZone || CONCURRENT_ANNUAL_RATIO_TIME_ZONE,
+  );
+  const dayRadius = options.annualRatioDayRadius ?? CONCURRENT_ANNUAL_RATIO_DAY_RADIUS;
+  const slotRadius = options.annualRatioSlotRadius ?? CONCURRENT_ANNUAL_RATIO_SLOT_RADIUS;
+  const daySigma = options.annualRatioDaySigma ?? CONCURRENT_ANNUAL_RATIO_DAY_SIGMA;
+  const slotSigma = options.annualRatioSlotSigma ?? CONCURRENT_ANNUAL_RATIO_SLOT_SIGMA;
+  const yearLookback = options.annualRatioYearLookback ?? CONCURRENT_ANNUAL_RATIO_YEAR_LOOKBACK;
+  const yearHalfLife = options.annualRatioYearHalfLife ?? CONCURRENT_ANNUAL_RATIO_YEAR_HALF_LIFE;
+  const shrinkage = options.annualRatioShrinkage ?? CONCURRENT_ANNUAL_RATIO_SHRINKAGE;
+  const minRatio = options.annualRatioMin ?? CONCURRENT_ANNUAL_RATIO_MIN;
+  const maxRatio = options.annualRatioMax ?? CONCURRENT_ANNUAL_RATIO_MAX;
+  const yearDecayLambda = Math.log(2) / Math.max(0.01, yearHalfLife);
+  let totalWeight = 0;
+  let weightedRatio = 0;
+  let sampleCount = 0;
+
+  for (let yearOffset = 1; yearOffset <= yearLookback; yearOffset += 1) {
+    const yearWeight = Math.exp(-yearDecayLambda * (yearOffset - 1));
+    for (let dayOffset = -dayRadius; dayOffset <= dayRadius; dayOffset += 1) {
+      const dayWeight = Math.exp(-0.5 * (dayOffset / Math.max(0.01, daySigma)) ** 2);
+      for (let slotOffset = -slotRadius; slotOffset <= slotRadius; slotOffset += 1) {
+        const key = buildOffsetLocalPartsSlotKey(referenceParts, yearOffset, dayOffset, slotOffset);
+        const entries = state.annualRatioHistory.get(key);
+        if (!entries?.length) {
+          continue;
+        }
+
+        const slotWeight = Math.exp(-0.5 * (slotOffset / Math.max(0.01, slotSigma)) ** 2);
+        const weight = yearWeight * dayWeight * slotWeight;
+        for (const entry of entries) {
+          totalWeight += weight;
+          weightedRatio += weight * entry.ratio;
+          sampleCount += 1;
+        }
+      }
+    }
+  }
+
+  if (!totalWeight) {
+    return null;
+  }
+
+  const calendarBlendWeight = Math.max(0, Math.min(1, totalWeight / (totalWeight + shrinkage)));
+  const ratio = Math.max(minRatio, Math.min(maxRatio, weightedRatio / totalWeight));
+  const annualExpectedConcurrentCount = baseExpectedConcurrentCount * ratio;
+  const calendarAdjustment = annualExpectedConcurrentCount - baseExpectedConcurrentCount;
+
+  return {
+    calendarAdjustment,
+    calendarSampleCount: sampleCount,
+    calendarEffectiveWeight: totalWeight,
+    calendarBlendWeight,
+    annualRatio: ratio,
+    annualExpectedConcurrentCount,
+  };
+}
+
 function trimRelevantHistories(state, weekday, slot, cutoffTimestampMs) {
   for (const neighborSlot of getNeighborSlots(slot)) {
     trimHistoryQueue(state.slotHistory[neighborSlot], cutoffTimestampMs);
@@ -407,7 +556,7 @@ function trimRelevantHistories(state, weekday, slot, cutoffTimestampMs) {
   }
 }
 
-function buildConcurrentPredictionFromState(referenceIso, concurrentCount, state) {
+function buildConcurrentPredictionFromState(referenceIso, concurrentCount, state, options = {}) {
   const canonicalReferenceIso = roundIsoToNearestHalfHour(referenceIso);
   const referenceTimestampMs = Date.parse(canonicalReferenceIso);
   if (!Number.isFinite(referenceTimestampMs)) {
@@ -500,11 +649,18 @@ function buildConcurrentPredictionFromState(referenceIso, concurrentCount, state
       { weight: 1 - timeOfWeekBlendWeight, value: timeOfDayComponent.value },
       { weight: timeOfWeekBlendWeight, value: timeOfWeekComponent.value },
     ]) ?? Number(concurrentCount || 0);
-  const calendarAdjustment = buildCalendarResidualAdjustment(
+  const residualCalendarAdjustment = buildCalendarResidualAdjustment(
     state,
     canonicalReferenceIso,
     referenceTimestampMs,
   );
+  const annualRatioAdjustment = buildAnnualRatioAdjustment(
+    state,
+    canonicalReferenceIso,
+    baseExpectedConcurrentCount,
+    options,
+  );
+  const calendarAdjustment = annualRatioAdjustment || residualCalendarAdjustment;
   const expectedConcurrentCount =
     baseExpectedConcurrentCount +
     calendarAdjustment.calendarAdjustment * calendarAdjustment.calendarBlendWeight;
@@ -541,6 +697,12 @@ function buildConcurrentPredictionFromState(referenceIso, concurrentCount, state
     calendarSampleCount: calendarAdjustment.calendarSampleCount,
     calendarEffectiveWeight: calendarAdjustment.calendarEffectiveWeight,
     calendarBlendWeight: calendarAdjustment.calendarBlendWeight,
+    annualRatio: calendarAdjustment.annualRatio ?? null,
+    annualExpectedConcurrentCount: calendarAdjustment.annualExpectedConcurrentCount ?? null,
+    concurrentPredictionModel: options.concurrentPredictionModel || "calendar-residual",
+    concurrentPredictionTimeZone: annualRatioAdjustment
+      ? options.annualRatioTimeZone || CONCURRENT_ANNUAL_RATIO_TIME_ZONE
+      : null,
     expectedConcurrentCount: modelReady ? expectedConcurrentCount : Number(concurrentCount || 0),
     expectedConcurrentStdDev: modelReady ? expectedConcurrentStdDev : CONCURRENT_MIN_STD_DEV,
     calendarLearningResidual,
@@ -581,7 +743,7 @@ function calibrateConcurrentAlarmThreshold(records) {
   return Math.max(MIN_ALARM_SIGMA_THRESHOLD, Math.ceil((secondHighestPeak + 0.05) * 10) / 10);
 }
 
-function buildConcurrentPredictionContext(rows) {
+function buildConcurrentPredictionContext(rows, options = {}) {
   const normalizedRows = rows.map((row) => ({
     sampledAt: row.sampledAt,
     concurrentCount: Number(row.concurrentCount || 0),
@@ -592,6 +754,7 @@ function buildConcurrentPredictionContext(rows) {
     slotResidualHistory: Array.from({ length: 48 }, () => []),
     weekdaySlotResidualHistory: Array.from({ length: 7 }, () => Array.from({ length: 48 }, () => [])),
     calendarDayResidualHistory: Array.from({ length: 366 }, () => []),
+    annualRatioHistory: new Map(),
     historySampleCount: 0,
     alarmSigmaThreshold: DEFAULT_ALARM_SIGMA_THRESHOLD,
   };
@@ -635,7 +798,7 @@ function buildConcurrentPredictionContext(rows) {
       };
     }
 
-    const prediction = buildConcurrentPredictionFromState(row.sampledAt, row.concurrentCount, state);
+    const prediction = buildConcurrentPredictionFromState(row.sampledAt, row.concurrentCount, state, options);
     provisionalRecords.push({
       sampledAt: row.sampledAt,
       concurrentCount: row.concurrentCount,
@@ -661,6 +824,25 @@ function buildConcurrentPredictionContext(rows) {
 
     if (prediction.modelReady && Number.isFinite(prediction.calendarLearningResidual)) {
       pendingCalendarResiduals.push(prediction.calendarLearningResidual);
+    }
+
+    if (
+      prediction.modelReady &&
+      Number.isFinite(prediction.baseExpectedConcurrentCount) &&
+      prediction.baseExpectedConcurrentCount > 0
+    ) {
+      const annualRatioKey = buildLocalPartsSlotKey(
+        getTimeZoneCalendarParts(
+          prediction.canonicalReferenceIso,
+          options.annualRatioTimeZone || CONCURRENT_ANNUAL_RATIO_TIME_ZONE,
+        ),
+      );
+      const annualRatioEntries = state.annualRatioHistory.get(annualRatioKey) || [];
+      annualRatioEntries.push({
+        timestampMs,
+        ratio: row.concurrentCount / prediction.baseExpectedConcurrentCount,
+      });
+      state.annualRatioHistory.set(annualRatioKey, annualRatioEntries);
     }
 
     state.historySampleCount += 1;
@@ -714,8 +896,13 @@ function getNearestConcurrentRecord(context, referenceIso) {
   return nearestDifferenceMs <= MATCH_WINDOW_MS ? nearestRecord : null;
 }
 
-function computeConcurrentPredictionModel(referenceIso, concurrentCount, concurrentContext = null) {
-  const context = concurrentContext || buildConcurrentPredictionContext(getAllRollingMetrics());
+function computeConcurrentPredictionModel(
+  referenceIso,
+  concurrentCount,
+  concurrentContext = null,
+  options = {},
+) {
+  const context = concurrentContext || buildConcurrentPredictionContext(getAllRollingMetrics(), options);
   const referenceRecord = getNearestConcurrentRecord(context, referenceIso);
 
   if (referenceRecord) {
@@ -741,7 +928,7 @@ function computeConcurrentPredictionModel(referenceIso, concurrentCount, concurr
     };
   }
 
-  const prediction = buildConcurrentPredictionFromState(referenceIso, concurrentCount, context.state);
+  const prediction = buildConcurrentPredictionFromState(referenceIso, concurrentCount, context.state, options);
   const compositeSignal = computeBaselineSignal(
     Number(concurrentCount || 0),
     Number(prediction.expectedConcurrentCount || 0),
@@ -808,14 +995,22 @@ function getTrailingConcurrentRecords(records, days = 365) {
   return records.filter((record) => Date.parse(record.sampledAt) >= lowerBound);
 }
 
-function buildDashboardPayload({ liveStatus: liveStatusOverride = null } = {}) {
+function buildDashboardPayload({
+  liveStatus: liveStatusOverride = null,
+  concurrentPredictionOptions = {},
+} = {}) {
   const tracking = getTrackingSummary();
   const liveStatus = buildStoredHeatmapStatus(liveStatusOverride || {});
   const referenceIso = liveStatus.latestSampledAt || new Date().toISOString();
   const concurrentCount = getConcurrentCount(HEATMAP_SOURCE);
   const rollingHistory = getAllRollingMetrics();
-  const concurrentContext = buildConcurrentPredictionContext(rollingHistory);
-  const currentModel = computeConcurrentPredictionModel(referenceIso, concurrentCount, concurrentContext);
+  const concurrentContext = buildConcurrentPredictionContext(rollingHistory, concurrentPredictionOptions);
+  const currentModel = computeConcurrentPredictionModel(
+    referenceIso,
+    concurrentCount,
+    concurrentContext,
+    concurrentPredictionOptions,
+  );
   const archiveSeries = compactArchiveSeries(getTrailingConcurrentRecords(concurrentContext.records));
 
   return {
@@ -851,6 +1046,10 @@ function buildDashboardPayload({ liveStatus: liveStatusOverride = null } = {}) {
         calendarSampleCount: currentModel.calendarSampleCount,
         calendarEffectiveWeight: currentModel.calendarEffectiveWeight,
         calendarBlendWeight: currentModel.calendarBlendWeight,
+        annualRatio: currentModel.annualRatio,
+        annualExpectedConcurrentCount: currentModel.annualExpectedConcurrentCount,
+        concurrentPredictionModel: currentModel.concurrentPredictionModel,
+        concurrentPredictionTimeZone: currentModel.concurrentPredictionTimeZone,
         timeOfDaySampleCount: currentModel.timeOfDaySampleCount,
         timeOfWeekSampleCount: currentModel.timeOfWeekSampleCount,
         timeOfWeekBlendWeight: currentModel.timeOfWeekBlendWeight,
@@ -869,7 +1068,11 @@ function buildDashboardPayload({ liveStatus: liveStatusOverride = null } = {}) {
   };
 }
 
-function buildDashboardSnapshot({ liveStatus = null, snapshotGeneratedAt = new Date().toISOString() } = {}) {
+function buildDashboardSnapshot({
+  liveStatus = null,
+  snapshotGeneratedAt = new Date().toISOString(),
+  concurrentPredictionOptions = {},
+} = {}) {
   const trackedCount = getTrackedAircraftCount();
   const hasAnyHistoricalData = getAllRollingMetrics().length > 0;
   const onlyDemoData = areAllTrackedAircraftDemo();
@@ -887,7 +1090,7 @@ function buildDashboardSnapshot({ liveStatus = null, snapshotGeneratedAt = new D
   }
 
   return {
-    ...buildDashboardPayload({ liveStatus }),
+    ...buildDashboardPayload({ liveStatus, concurrentPredictionOptions }),
     snapshotGeneratedAt,
   };
 }
@@ -898,5 +1101,7 @@ module.exports = {
   buildStoredHeatmapStatus,
   buildConcurrentPredictionContext,
   computeConcurrentPredictionModel,
+  CONCURRENT_ANNUAL_RATIO_MODEL,
+  CONCURRENT_ANNUAL_RATIO_TIME_ZONE,
   HEATMAP_SOURCE,
 };

@@ -44,18 +44,28 @@ function main() {
 
   const { ensureDirectories, DATA_DIR, DB_PATH } = require("../server/config");
   const { initDb } = require("../server/db");
-  const { buildDashboardSnapshot } = require("../server/dashboard");
+  const {
+    buildDashboardSnapshot,
+    CONCURRENT_ANNUAL_RATIO_MODEL,
+    CONCURRENT_ANNUAL_RATIO_TIME_ZONE,
+  } = require("../server/dashboard");
   const output = args.output || path.join(DATA_DIR, "published", "beta-dashboard.json");
+  const concurrentPredictionOptions = {
+    concurrentPredictionModel: CONCURRENT_ANNUAL_RATIO_MODEL,
+    annualRatioTimeZone: process.env.EWS_BETA_MODEL_TIME_ZONE || CONCURRENT_ANNUAL_RATIO_TIME_ZONE,
+  };
 
   ensureDirectories();
   initDb();
 
   const snapshot = {
-    ...buildDashboardSnapshot(),
+    ...buildDashboardSnapshot({ concurrentPredictionOptions }),
     beta: {
       enabled: true,
       dbPath: DB_PATH,
       cohort: "global_business_jet",
+      predictionModel: concurrentPredictionOptions.concurrentPredictionModel,
+      predictionTimeZone: concurrentPredictionOptions.annualRatioTimeZone,
     },
   };
   fs.mkdirSync(path.dirname(output), { recursive: true });
