@@ -21,6 +21,8 @@ env:
   PUBLIC_BUCKET: ews-public
   EWS_PUBLIC_URL: https://ews.kylemcdonald.net/
   EWS_RSS_URL: https://ews.kylemcdonald.net/rss.xml
+  VITE_DASHBOARD_URL: https://pub-49bb6a6f314c47be9b481c25e5f6ca9e.r2.dev/dashboard.json
+  VITE_BETA_DASHBOARD_URL: https://pub-49bb6a6f314c47be9b481c25e5f6ca9e.r2.dev/beta-dashboard.json
 
 concurrency:
   group: deploy-pages

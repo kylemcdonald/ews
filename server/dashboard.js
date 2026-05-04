@@ -27,6 +27,13 @@ const CONCURRENT_WEEKDAY_SLOT_NEIGHBOR_WEIGHT = 1;
 const CONCURRENT_WEEKDAY_SHRINKAGE = 2;
 const CONCURRENT_MIN_HISTORY_SAMPLES = 7 * 48;
 const CONCURRENT_MIN_STD_DEV = 8;
+const CONCURRENT_CALENDAR_LOOKBACK_DAYS = 366 * 3;
+const CONCURRENT_CALENDAR_MIN_AGE_DAYS = 180;
+const CONCURRENT_CALENDAR_NEIGHBOR_DAYS = 7;
+const CONCURRENT_CALENDAR_DISTANCE_SCALE_DAYS = 2.5;
+const CONCURRENT_CALENDAR_HALF_LIFE_DAYS = 366 * 2;
+const CONCURRENT_CALENDAR_WEEKDAY_MISMATCH_WEIGHT = 0.6;
+const CONCURRENT_CALENDAR_SHRINKAGE = 2;
 const MIN_ALARM_SIGMA_THRESHOLD = 4;
 const DEFAULT_ALARM_SIGMA_THRESHOLD = 7;
 const ARCHIVE_DECIMAL_PLACES = 2;
@@ -209,6 +216,13 @@ function getWeekdayFromIso(referenceIso) {
   return new Date(referenceIso).getUTCDay();
 }
 
+function getDayOfYearFromIso(referenceIso) {
+  const date = new Date(referenceIso);
+  const dayStart = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  const yearStart = Date.UTC(date.getUTCFullYear(), 0, 1);
+  return Math.floor((dayStart - yearStart) / DAY_MS);
+}
+
 function getNeighborSlots(slot) {
   return [normalizeSlot(slot - 1), normalizeSlot(slot), normalizeSlot(slot + 1)];
 }
@@ -312,6 +326,78 @@ function buildNeighborhoodScale(entriesBySlot, referenceTimestampMs, halfLifeDay
   ]);
 }
 
+function normalizeDayOfYear(dayOfYear) {
+  return (dayOfYear + 366) % 366;
+}
+
+function calendarDistanceDays(leftDayOfYear, rightDayOfYear) {
+  const directDistance = Math.abs(leftDayOfYear - rightDayOfYear);
+  return Math.min(directDistance, 366 - directDistance);
+}
+
+function buildCalendarResidualAdjustment(state, referenceIso, referenceTimestampMs) {
+  const referenceDayOfYear = getDayOfYearFromIso(referenceIso);
+  const referenceWeekday = getWeekdayFromIso(referenceIso);
+  const minAgeMs = CONCURRENT_CALENDAR_MIN_AGE_DAYS * DAY_MS;
+  const maxAgeMs = CONCURRENT_CALENDAR_LOOKBACK_DAYS * DAY_MS;
+  const decayLambda = Math.log(2) / CONCURRENT_CALENDAR_HALF_LIFE_DAYS;
+  let totalWeight = 0;
+  let weightedResidual = 0;
+  let sampleCount = 0;
+
+  for (
+    let offset = -CONCURRENT_CALENDAR_NEIGHBOR_DAYS;
+    offset <= CONCURRENT_CALENDAR_NEIGHBOR_DAYS;
+    offset += 1
+  ) {
+    const bucket = state.calendarDayResidualHistory[normalizeDayOfYear(referenceDayOfYear + offset)];
+    for (const entry of bucket) {
+      const ageMs = referenceTimestampMs - entry.timestampMs;
+      if (ageMs < minAgeMs || ageMs > maxAgeMs) {
+        continue;
+      }
+
+      const distanceDays = calendarDistanceDays(entry.dayOfYear, referenceDayOfYear);
+      if (distanceDays > CONCURRENT_CALENDAR_NEIGHBOR_DAYS) {
+        continue;
+      }
+
+      const calendarWeight = Math.exp(
+        -0.5 * (distanceDays / CONCURRENT_CALENDAR_DISTANCE_SCALE_DAYS) ** 2,
+      );
+      const ageWeight = Math.exp(-decayLambda * (ageMs / DAY_MS));
+      const weekdayWeight =
+        entry.weekday === referenceWeekday ? 1 : CONCURRENT_CALENDAR_WEEKDAY_MISMATCH_WEIGHT;
+      const sampleWeight = Math.max(1, Math.sqrt(entry.sampleCount || 1));
+      const weight = calendarWeight * ageWeight * weekdayWeight * sampleWeight;
+      totalWeight += weight;
+      weightedResidual += weight * entry.residual;
+      sampleCount += 1;
+    }
+  }
+
+  if (!totalWeight) {
+    return {
+      calendarAdjustment: 0,
+      calendarSampleCount: 0,
+      calendarEffectiveWeight: 0,
+      calendarBlendWeight: 0,
+    };
+  }
+
+  const calendarBlendWeight = Math.max(
+    0,
+    Math.min(1, totalWeight / (totalWeight + CONCURRENT_CALENDAR_SHRINKAGE)),
+  );
+
+  return {
+    calendarAdjustment: weightedResidual / totalWeight,
+    calendarSampleCount: sampleCount,
+    calendarEffectiveWeight: totalWeight,
+    calendarBlendWeight,
+  };
+}
+
 function trimRelevantHistories(state, weekday, slot, cutoffTimestampMs) {
   for (const neighborSlot of getNeighborSlots(slot)) {
     trimHistoryQueue(state.slotHistory[neighborSlot], cutoffTimestampMs);
@@ -409,11 +495,19 @@ function buildConcurrentPredictionFromState(referenceIso, concurrentCount, state
         (timeOfWeekComponent.effectiveSampleCount + CONCURRENT_WEEKDAY_SHRINKAGE),
     ),
   );
-  const expectedConcurrentCount =
+  const baseExpectedConcurrentCount =
     weightedMean([
       { weight: 1 - timeOfWeekBlendWeight, value: timeOfDayComponent.value },
       { weight: timeOfWeekBlendWeight, value: timeOfWeekComponent.value },
     ]) ?? Number(concurrentCount || 0);
+  const calendarAdjustment = buildCalendarResidualAdjustment(
+    state,
+    canonicalReferenceIso,
+    referenceTimestampMs,
+  );
+  const expectedConcurrentCount =
+    baseExpectedConcurrentCount +
+    calendarAdjustment.calendarAdjustment * calendarAdjustment.calendarBlendWeight;
   const expectedConcurrentStdDev = Math.max(
     CONCURRENT_MIN_STD_DEV,
     weightedMean([
@@ -425,6 +519,9 @@ function buildConcurrentPredictionFromState(referenceIso, concurrentCount, state
     state.historySampleCount >= CONCURRENT_MIN_HISTORY_SAMPLES &&
     (Number.isFinite(timeOfDayComponent.value) || Number.isFinite(timeOfWeekComponent.value));
   const divergence = modelReady ? Number(concurrentCount || 0) - expectedConcurrentCount : 0;
+  const calendarLearningResidual = modelReady
+    ? Number(concurrentCount || 0) - baseExpectedConcurrentCount
+    : 0;
   const sigmaShift = modelReady ? divergence / expectedConcurrentStdDev : 0;
 
   return {
@@ -439,8 +536,14 @@ function buildConcurrentPredictionFromState(referenceIso, concurrentCount, state
     timeOfDaySampleCount: timeOfDayComponent.exactSampleCount,
     timeOfWeekSampleCount: timeOfWeekComponent.exactSampleCount,
     timeOfWeekBlendWeight,
+    baseExpectedConcurrentCount,
+    calendarAdjustment: calendarAdjustment.calendarAdjustment,
+    calendarSampleCount: calendarAdjustment.calendarSampleCount,
+    calendarEffectiveWeight: calendarAdjustment.calendarEffectiveWeight,
+    calendarBlendWeight: calendarAdjustment.calendarBlendWeight,
     expectedConcurrentCount: modelReady ? expectedConcurrentCount : Number(concurrentCount || 0),
     expectedConcurrentStdDev: modelReady ? expectedConcurrentStdDev : CONCURRENT_MIN_STD_DEV,
+    calendarLearningResidual,
     sigmaShift,
     divergence,
   };
@@ -488,12 +591,50 @@ function buildConcurrentPredictionContext(rows) {
     weekdaySlotHistory: Array.from({ length: 7 }, () => Array.from({ length: 48 }, () => [])),
     slotResidualHistory: Array.from({ length: 48 }, () => []),
     weekdaySlotResidualHistory: Array.from({ length: 7 }, () => Array.from({ length: 48 }, () => [])),
+    calendarDayResidualHistory: Array.from({ length: 366 }, () => []),
     historySampleCount: 0,
     alarmSigmaThreshold: DEFAULT_ALARM_SIGMA_THRESHOLD,
   };
   const provisionalRecords = [];
+  let pendingCalendarDay = null;
+  let pendingCalendarResiduals = [];
+
+  function flushPendingCalendarDay() {
+    if (!pendingCalendarDay || !pendingCalendarResiduals.length) {
+      pendingCalendarDay = null;
+      pendingCalendarResiduals = [];
+      return;
+    }
+
+    const residual = mean(pendingCalendarResiduals);
+    if (Number.isFinite(residual)) {
+      state.calendarDayResidualHistory[pendingCalendarDay.dayOfYear].push({
+        ...pendingCalendarDay,
+        residual,
+        sampleCount: pendingCalendarResiduals.length,
+      });
+    }
+
+    pendingCalendarDay = null;
+    pendingCalendarResiduals = [];
+  }
 
   for (const row of normalizedRows) {
+    const canonicalRowIso = roundIsoToNearestHalfHour(row.sampledAt);
+    const rowDayKey = canonicalRowIso.slice(0, 10);
+    if (pendingCalendarDay && pendingCalendarDay.dayKey !== rowDayKey) {
+      flushPendingCalendarDay();
+    }
+    if (!pendingCalendarDay) {
+      const timestampMs = Date.parse(canonicalRowIso);
+      pendingCalendarDay = {
+        dayKey: rowDayKey,
+        timestampMs,
+        dayOfYear: getDayOfYearFromIso(canonicalRowIso),
+        weekday: getWeekdayFromIso(canonicalRowIso),
+      };
+    }
+
     const prediction = buildConcurrentPredictionFromState(row.sampledAt, row.concurrentCount, state);
     provisionalRecords.push({
       sampledAt: row.sampledAt,
@@ -518,8 +659,13 @@ function buildConcurrentPredictionContext(rows) {
       state.weekdaySlotResidualHistory[prediction.weekday][prediction.slot].push(residualEntry);
     }
 
+    if (prediction.modelReady && Number.isFinite(prediction.calendarLearningResidual)) {
+      pendingCalendarResiduals.push(prediction.calendarLearningResidual);
+    }
+
     state.historySampleCount += 1;
   }
+  flushPendingCalendarDay();
 
   const alarmSigmaThreshold = calibrateConcurrentAlarmThreshold(provisionalRecords);
   state.alarmSigmaThreshold = alarmSigmaThreshold;
@@ -701,6 +847,10 @@ function buildDashboardPayload({ liveStatus: liveStatusOverride = null } = {}) {
         expectedConcurrentStdDev: currentModel.expectedConcurrentStdDev,
         timeOfDayExpected: currentModel.timeOfDayExpected,
         timeOfWeekExpected: currentModel.timeOfWeekExpected,
+        calendarAdjustment: currentModel.calendarAdjustment,
+        calendarSampleCount: currentModel.calendarSampleCount,
+        calendarEffectiveWeight: currentModel.calendarEffectiveWeight,
+        calendarBlendWeight: currentModel.calendarBlendWeight,
         timeOfDaySampleCount: currentModel.timeOfDaySampleCount,
         timeOfWeekSampleCount: currentModel.timeOfWeekSampleCount,
         timeOfWeekBlendWeight: currentModel.timeOfWeekBlendWeight,

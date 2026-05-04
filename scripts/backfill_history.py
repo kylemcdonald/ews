@@ -193,9 +193,13 @@ def ingest_metrics(connection, tracked_by_hex, start_date, end_date, skip_downlo
     range_start_iso = f"{start_date.isoformat()}T00:00:00+00:00"
     range_end_iso = f"{end_date.isoformat()}T00:00:00+00:00"
     recompute_start = dt.datetime.combine(start_date, dt.time.min, tzinfo=dt.timezone.utc)
-    recent_cutoff = dt.datetime.combine(end_date, dt.time.min, tzinfo=dt.timezone.utc) - dt.timedelta(
-        hours=RECENT_HISTORY_TAIL_HOURS
-    )
+    today = dt.datetime.now(dt.timezone.utc).date()
+    refresh_recent_activity = end_date >= today - dt.timedelta(days=2)
+    recent_cutoff = None
+    if refresh_recent_activity:
+        recent_cutoff = dt.datetime.combine(end_date, dt.time.min, tzinfo=dt.timezone.utc) - dt.timedelta(
+            hours=RECENT_HISTORY_TAIL_HOURS
+        )
 
     connection.execute(
         """
@@ -222,7 +226,8 @@ def ingest_metrics(connection, tracked_by_hex, start_date, end_date, skip_downlo
         """,
         (start_date.isoformat(), end_date.isoformat()),
     )
-    connection.execute("DELETE FROM recent_history_activity")
+    if refresh_recent_activity:
+        connection.execute("DELETE FROM recent_history_activity")
 
     total_files = (end_date - start_date).days * 48
     processed_files = 0
@@ -284,7 +289,7 @@ def ingest_metrics(connection, tracked_by_hex, start_date, end_date, skip_downlo
 
                     hex_value = telemetry.hex.lower()
                     slice_active_hexes.add(hex_value)
-                    if heatmap_slice.timestamp >= recent_cutoff:
+                    if refresh_recent_activity and heatmap_slice.timestamp >= recent_cutoff:
                         tracked_entry = tracked_by_hex.get(hex_value)
                         existing_timestamp = recent_activity.get(hex_value, {}).get("last_observed_at")
                         observed_at_iso = heatmap_slice.timestamp.isoformat()
@@ -391,7 +396,7 @@ def ingest_metrics(connection, tracked_by_hex, start_date, end_date, skip_downlo
         final_daily_rows,
     )
 
-    if recent_activity:
+    if refresh_recent_activity and recent_activity:
         connection.executemany(
             """
             INSERT INTO recent_history_activity (

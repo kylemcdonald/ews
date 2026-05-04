@@ -5,6 +5,7 @@ import worldAtlas from 'world-atlas/countries-110m.json'
 import './App.css'
 
 const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || '/api/dashboard'
+const BETA_DASHBOARD_URL = import.meta.env.VITE_BETA_DASHBOARD_URL || '/beta-dashboard.json'
 const DASHBOARD_CACHE_BUSTER_MINUTES = 5
 const DASHBOARD_POLL_INTERVAL_MS = 5 * 60_000
 const MAP_WIDTH = 800
@@ -913,8 +914,8 @@ function buildLiveModelSummary(aircraft) {
     })
 }
 
-function buildDashboardRequestUrl() {
-  const url = new URL(DASHBOARD_URL, window.location.href)
+function buildDashboardRequestUrl(dashboardUrl) {
+  const url = new URL(dashboardUrl, window.location.href)
   const bucketMs = DASHBOARD_CACHE_BUSTER_MINUTES * 60 * 1000
   url.searchParams.set('v', String(Math.floor(Date.now() / bucketMs)))
   return url.toString()
@@ -1771,7 +1772,9 @@ function ModelSummaryList({ aircraft }) {
   )
 }
 
-function AboutSystemCard() {
+function AboutSystemCard({ cohort }) {
+  const isGlobalCohort = cohort?.source === 'global_business_jet' || Number(cohort?.globalCount || 0) > 0
+
   return (
     <section className="panel about-panel">
       <div className="panel-header">
@@ -1781,13 +1784,26 @@ function AboutSystemCard() {
         <p>
           This site watches a fixed cohort of business jets and asks a simple question: is the number currently airborne
           unusual for this time? It is not tracking all aircraft. The tracked set is built from{' '}
-          <a
-            href="https://www.faa.gov/licenses_certificates/aircraft_certification/aircraft_registry/releasable_aircraft_download"
-            target="_blank"
-            rel="noreferrer"
-          >
-            FAA registry data
-          </a>{' '}
+          {isGlobalCohort ? (
+            <>
+              public global aircraft metadata, ADS-B Exchange lookups, Mictronics/tar1090 records, and{' '}
+              <a
+                href="https://www.faa.gov/licenses_certificates/aircraft_certification/aircraft_registry/releasable_aircraft_download"
+                target="_blank"
+                rel="noreferrer"
+              >
+                FAA registry data
+              </a>
+            </>
+          ) : (
+            <a
+              href="https://www.faa.gov/licenses_certificates/aircraft_certification/aircraft_registry/releasable_aircraft_download"
+              target="_blank"
+              rel="noreferrer"
+            >
+              FAA registry data
+            </a>
+          )}{' '}
           with a practical business-jet filter, and each aircraft is matched by its{' '}
           <a
             href="https://en.wikipedia.org/wiki/Aviation_transponder_interrogation_modes#ICAO_24-bit_address"
@@ -1825,9 +1841,9 @@ function AboutSystemCard() {
         </p>
         <p>
           There are important limits. ADS-B coverage can be incomplete, aircraft may be blocked or misidentified, heatmaps
-          arrive in coarse half-hour windows, and the FAA-derived cohort is a heuristic rather than a perfect definition of
-          every relevant private jet. The dashboard is best read as an anomaly monitor for public flight signals, not as
-          proof of intent, destination, ownership activity, or who is on board.
+          arrive in coarse half-hour windows, and the {isGlobalCohort ? 'global' : 'FAA-derived'} cohort is a heuristic
+          rather than a perfect definition of every relevant private jet. The dashboard is best read as an anomaly monitor
+          for public flight signals, not as proof of intent, destination, ownership activity, or who is on board.
         </p>
         <p className="about-credit">
           Built by{' '}
@@ -1862,7 +1878,7 @@ function LoadingAnimation() {
   )
 }
 
-function App() {
+function DashboardApp({ dashboardUrl = DASHBOARD_URL }) {
   const [dashboard, setDashboard] = useState(null)
   const [error, setError] = useState(null)
   const [backgroundReady, setBackgroundReady] = useState(false)
@@ -1893,17 +1909,6 @@ function App() {
     emergencySchemeTapTimesRef.current = recentTapTimes
   }
 
-  async function requestDashboard() {
-    const response = await fetch(buildDashboardRequestUrl(), {
-      cache: 'no-store',
-    })
-    if (!response.ok) {
-      throw new Error(`Dashboard request failed with ${response.status}`)
-    }
-
-    return response.json()
-  }
-
   useEffect(() => {
     let active = true
     const backgroundPreload = document.getElementById(BACKGROUND_PRELOAD_LINK_ID)
@@ -1926,7 +1931,14 @@ function App() {
 
     async function loadDashboard() {
       try {
-        const nextDashboard = await requestDashboard()
+        const response = await fetch(buildDashboardRequestUrl(dashboardUrl), {
+          cache: 'no-store',
+        })
+        if (!response.ok) {
+          throw new Error(`Dashboard request failed with ${response.status}`)
+        }
+
+        const nextDashboard = await response.json()
         if (active) {
           applyDashboard(nextDashboard)
         }
@@ -1946,7 +1958,7 @@ function App() {
       backgroundPreload?.removeEventListener('error', markBackgroundReady)
       window.clearInterval(intervalId)
     }
-  }, [])
+  }, [dashboardUrl])
 
   const shouldShowLoading = !dashboard || !backgroundReady
 
@@ -2086,7 +2098,7 @@ function App() {
         <section className="details-stack">
           <ArchiveChart data={archiveData} signal={compositeSignal} />
           <ModelSummaryList aircraft={liveAircraft} />
-          <AboutSystemCard />
+          <AboutSystemCard cohort={dashboard.cohort} />
         </section>
       </main>
     )
@@ -2098,6 +2110,14 @@ function App() {
       {content}
     </>
   )
+}
+
+function App() {
+  if (window.location.pathname === '/beta' || window.location.pathname.startsWith('/beta/')) {
+    return <DashboardApp dashboardUrl={BETA_DASHBOARD_URL} />
+  }
+
+  return <DashboardApp />
 }
 
 export default App

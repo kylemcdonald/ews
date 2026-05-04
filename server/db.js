@@ -490,6 +490,7 @@ function getTrackingSummary() {
       SELECT
         COUNT(*) AS tracked_count,
         SUM(CASE WHEN source = 'faa_business_jet' THEN 1 ELSE 0 END) AS faa_count,
+        SUM(CASE WHEN source = 'global_business_jet' THEN 1 ELSE 0 END) AS global_count,
         SUM(CASE WHEN source = 'local_watchlist' THEN 1 ELSE 0 END) AS watchlist_count
       FROM tracked_aircraft
       WHERE source != 'demo'
@@ -498,6 +499,7 @@ function getTrackingSummary() {
 
   const trackedCount = Number(row?.tracked_count ?? 0);
   const faaCount = Number(row?.faa_count ?? 0);
+  const globalCount = Number(row?.global_count ?? 0);
   const watchlistCount = Number(row?.watchlist_count ?? 0);
 
   if (!trackedCount) {
@@ -511,8 +513,12 @@ function getTrackingSummary() {
   return {
     configured: true,
     trackedCount,
+    faaCount,
+    globalCount,
+    watchlistCount,
     reason: null,
-    source: faaCount ? "faa_business_jet" : watchlistCount ? "local_watchlist" : "custom",
+    source: globalCount ? "global_business_jet" : faaCount ? "faa_business_jet" : watchlistCount ? "local_watchlist" : "custom",
+    sourceLabel: globalCount ? "Global public metadata + FAA" : faaCount ? "FAA registry" : watchlistCount ? "Local watchlist" : "Custom",
   };
 }
 

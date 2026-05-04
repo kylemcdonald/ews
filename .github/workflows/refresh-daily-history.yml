@@ -17,8 +17,11 @@ env:
   TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
   PUBLIC_BUCKET: ews-public
   STATE_BUCKET: ews-state
+  BETA_DB_PATH: data/ews-beta.sqlite
   EWS_PUBLIC_URL: https://ews.kylemcdonald.net/
   EWS_RSS_URL: https://ews.kylemcdonald.net/rss.xml
+  VITE_DASHBOARD_URL: https://pub-49bb6a6f314c47be9b481c25e5f6ca9e.r2.dev/dashboard.json
+  VITE_BETA_DASHBOARD_URL: https://pub-49bb6a6f314c47be9b481c25e5f6ca9e.r2.dev/beta-dashboard.json
 
 concurrency:
   group: refresh-daily-history
@@ -63,14 +66,44 @@ jobs:
             sleep $((attempt * 15))
           done
 
+      - name: Restore beta deployment state
+        run: |
+          mkdir -p data
+          for attempt in 1 2 3 4 5; do
+            if npx wrangler r2 object get "${STATE_BUCKET}/ews-beta.sqlite" --file "${BETA_DB_PATH}" --remote; then
+              exit 0
+            fi
+            echo "R2 beta restore attempt ${attempt} failed."
+            if [ "$attempt" -eq 5 ]; then
+              python3 scripts/import_faa_cohort.py --db "${BETA_DB_PATH}"
+              python3 scripts/import_global_cohort.py --db "${BETA_DB_PATH}"
+              exit 0
+            fi
+            sleep $((attempt * 15))
+          done
+
+      - name: Refresh beta global cohort metadata
+        run: |
+          python3 scripts/import_faa_cohort.py --db "${BETA_DB_PATH}"
+          python3 scripts/import_global_cohort.py --db "${BETA_DB_PATH}" --refresh
+
       - name: Roll daily history forward
         run: python3 scripts/backfill_history.py --relative-days 1
+
+      - name: Roll beta daily history forward
+        run: python3 scripts/backfill_history.py --db "${BETA_DB_PATH}" --relative-days 1
 
       - name: Refresh latest heatmap
         run: python3 scripts/update_latest_heatmap.py
 
+      - name: Refresh latest beta heatmap
+        run: python3 scripts/update_latest_heatmap.py --db "${BETA_DB_PATH}"
+
       - name: Export published dashboard snapshot
         run: node scripts/export_dashboard_snapshot.js --output tmp/dashboard.json
+
+      - name: Export published beta dashboard snapshot
+        run: node scripts/export_beta_dashboard_snapshot.js --db "${BETA_DB_PATH}" --output tmp/beta-dashboard.json
 
       - name: Send Telegram emergency alert
         run: node scripts/send_telegram_alert.js
@@ -90,6 +123,19 @@ jobs:
               exit 0
             fi
             echo "R2 state upload attempt ${attempt} failed."
+            if [ "$attempt" -eq 5 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+
+      - name: Upload beta deployment state
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if npx wrangler r2 object put "${STATE_BUCKET}/ews-beta.sqlite" --file "${BETA_DB_PATH}" --remote; then
+              exit 0
+            fi
+            echo "R2 beta state upload attempt ${attempt} failed."
             if [ "$attempt" -eq 5 ]; then
               exit 1
             fi
@@ -132,6 +178,23 @@ jobs:
               exit 0
             fi
             echo "R2 snapshot publish attempt ${attempt} failed."
+            if [ "$attempt" -eq 5 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+
+      - name: Publish beta live snapshot
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if npx wrangler r2 object put "${PUBLIC_BUCKET}/beta-dashboard.json" \
+              --file tmp/beta-dashboard.json \
+              --remote \
+              --content-type application/json \
+              --cache-control "public, max-age=300"; then
+              exit 0
+            fi
+            echo "R2 beta snapshot publish attempt ${attempt} failed."
             if [ "$attempt" -eq 5 ]; then
               exit 1
             fi
