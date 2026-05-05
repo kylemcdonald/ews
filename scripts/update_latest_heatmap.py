@@ -37,6 +37,11 @@ def parse_args():
         default=96,
         help="How many 30-minute slots to search backward when the newest heatmap is unavailable.",
     )
+    parser.add_argument(
+        "--fill-recent-slots",
+        action="store_true",
+        help="Also ingest any missing slots in the latest 24-hour window.",
+    )
     parser.add_argument("--force", action="store_true", help="Re-parse even if the newest cached slot is unchanged.")
     return parser.parse_args()
 
@@ -410,7 +415,11 @@ def main():
         current_slot_key = get_meta(connection, META_SLOT_KEY)
         current_window_samples = recent_sample_count(connection, selected["slot"])
 
-        if current_slot_key == selected["slot_key"] and current_window_samples >= RECENT_WINDOW_SLOTS - 1 and not args.force:
+        latest_slot_already_current = current_slot_key == selected["slot_key"]
+        recent_window_already_full = current_window_samples >= RECENT_WINDOW_SLOTS - 1
+        if latest_slot_already_current and not args.force and (
+            not args.fill_recent_slots or recent_window_already_full
+        ):
             sampled_at = get_meta(connection, META_SAMPLED_AT)
             summary = current_snapshot_summary(connection, sampled_at) if sampled_at else {
                 "matched_count": 0,
@@ -438,7 +447,8 @@ def main():
         latest_result = None
         selected_used_cache = selected["used_cache"]
 
-        for slot in build_recent_slots(selected["slot"]):
+        slots_to_ingest = build_recent_slots(selected["slot"]) if args.fill_recent_slots else [selected["slot"]]
+        for slot in slots_to_ingest:
             if slot != selected["slot"] and not args.force and slot_already_ingested(connection, slot):
                 continue
 
