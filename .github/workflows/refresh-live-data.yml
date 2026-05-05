@@ -90,32 +90,20 @@ jobs:
       - name: Restore military deployment state
         run: |
           mkdir -p data
-          for attempt in 1 2 3 4 5; do
-            if npx wrangler r2 object get "${STATE_BUCKET}/ews-military.sqlite" --file "${MILITARY_DB_PATH}" --remote; then
-              exit 0
-            fi
-            echo "R2 military restore attempt ${attempt} failed."
-            if [ "$attempt" -eq 5 ]; then
-              python3 scripts/import_global_cohort.py --db "${MILITARY_DB_PATH}" --tracked-category military --tracked-source global_military_aircraft
-              exit 0
-            fi
-            sleep $((attempt * 15))
-          done
+          if npx wrangler r2 object get "${STATE_BUCKET}/ews-military.sqlite" --file "${MILITARY_DB_PATH}" --remote; then
+            exit 0
+          fi
+          echo "R2 military state is not available yet; seeding a new deployment DB."
+          python3 scripts/import_global_cohort.py --db "${MILITARY_DB_PATH}" --tracked-category military --tracked-source global_military_aircraft
 
       - name: Restore untracked deployment state
         run: |
           mkdir -p data
-          for attempt in 1 2 3 4 5; do
-            if npx wrangler r2 object get "${STATE_BUCKET}/ews-untracked.sqlite" --file "${UNTRACKED_DB_PATH}" --remote; then
-              exit 0
-            fi
-            echo "R2 untracked restore attempt ${attempt} failed."
-            if [ "$attempt" -eq 5 ]; then
-              python3 scripts/track_non_icao_hex.py --db "${UNTRACKED_DB_PATH}" --latest-live --cache-dir data/cache/adsbx_live --replace-live-snapshot
-              exit 0
-            fi
-            sleep $((attempt * 15))
-          done
+          if npx wrangler r2 object get "${STATE_BUCKET}/ews-untracked.sqlite" --file "${UNTRACKED_DB_PATH}" --remote; then
+            exit 0
+          fi
+          echo "R2 untracked state is not available yet; seeding a new deployment DB."
+          python3 scripts/track_non_icao_hex.py --db "${UNTRACKED_DB_PATH}" --latest-live --cache-dir data/cache/adsbx_live --replace-live-snapshot
 
       - name: Refresh latest heatmap
         run: python3 scripts/update_latest_heatmap.py
