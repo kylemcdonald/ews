@@ -2096,27 +2096,6 @@ function SignupPage() {
           </section>
         </section>
 
-        <section className="panel about-panel signup-architecture-panel">
-          <div className="panel-header">
-            <div>
-              <h2>Storage Placeholder</h2>
-            </div>
-          </div>
-          <div className="about-copy">
-            <p>
-              The recommended production architecture is a private server endpoint backed by Cloudflare D1, matching the
-              current Cloudflare Pages deployment. The signup table should store email, phone, selected channels, Stripe
-              customer and subscription IDs, payment status, opt-in timestamp, consent copy version, Twilio opt-out
-              state, and the minimum audit metadata needed to prove consent.
-            </p>
-            <p>
-              The database should never be published with the static site or placed in R2. Public requests should only be
-              able to create or update their own signup through the endpoint; any admin access should be behind
-              Cloudflare Access or kept out of the public app entirely. Stripe webhooks can activate yearly subscriptions,
-              and Twilio webhooks can record STOP and HELP events before alert jobs send SMS or email.
-            </p>
-          </div>
-        </section>
       </main>
     </>
   )
