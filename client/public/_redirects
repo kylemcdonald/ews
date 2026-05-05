@@ -1,2 +1,4 @@
 /beta /beta/ 302
 /beta/* /index.html 200
+/signup /signup/ 302
+/signup/* /index.html 200

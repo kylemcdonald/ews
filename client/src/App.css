@@ -87,7 +87,8 @@
 .about-panel,
 .loading-panel,
 .error-panel,
-.provider-panel {
+.provider-panel,
+.signup-panel {
   padding: 16px;
 }
 
@@ -732,6 +733,100 @@ html.emergency-color-scheme .map-control-button:hover {
   color: #990000;
 }
 
+.signup-shell {
+  align-content: start;
+}
+
+.signup-grid {
+  align-items: stretch;
+}
+
+.signup-copy-panel p:last-child {
+  margin-bottom: 0;
+}
+
+.signup-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.signup-form {
+  display: grid;
+  gap: 12px;
+}
+
+.signup-field {
+  display: grid;
+  gap: 4px;
+}
+
+.signup-field span,
+.signup-consent {
+  color: #000000;
+}
+
+.signup-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #999999;
+  border-radius: 0;
+  background: #ffffff;
+  color: #000000;
+}
+
+.signup-field input:focus-visible,
+.signup-consent input:focus-visible,
+.signup-submit:focus-visible {
+  outline: 1px dotted #000000;
+  outline-offset: 2px;
+}
+
+.signup-consent {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  line-height: 1.3;
+}
+
+.signup-consent input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+}
+
+.signup-submit {
+  justify-self: start;
+  min-height: 36px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.signup-submit:hover {
+  background: #e5e5e5;
+}
+
+.signup-status {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #999999;
+}
+
+.signup-status-error {
+  background: #ffffdd;
+  color: #000000;
+}
+
+.signup-status-success {
+  background: #eef6ee;
+  color: #000000;
+}
+
+.signup-architecture-panel {
+  margin-top: 0;
+}
+
 .chart-frame {
   margin-top: 12px;
 }
@@ -1144,7 +1239,8 @@ html.emergency-color-scheme .map-control-button:hover {
   .about-panel,
   .loading-panel,
   .error-panel,
-  .provider-panel {
+  .provider-panel,
+  .signup-panel {
     padding: 12px;
   }
 

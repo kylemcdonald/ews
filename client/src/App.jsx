@@ -1944,6 +1944,184 @@ function LoadingAnimation() {
   )
 }
 
+function useInitialLoaderDismissed() {
+  useEffect(() => {
+    const initialLoader = document.getElementById('initial-loader')
+    document.documentElement.classList.remove('initial-loading')
+
+    if (!initialLoader) {
+      return undefined
+    }
+
+    initialLoader.classList.add('initial-loader-hidden')
+    const removalTimer = window.setTimeout(() => {
+      initialLoader.remove()
+    }, 140)
+
+    return () => {
+      window.clearTimeout(removalTimer)
+    }
+  }, [])
+}
+
+function SignupPage() {
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [smsConsent, setSmsConsent] = useState(false)
+  const [status, setStatus] = useState(null)
+
+  useInitialLoaderDismissed()
+
+  useEffect(() => {
+    const previousTitle = document.title
+    document.title = 'Apocalypse Notifications'
+
+    return () => {
+      document.title = previousTitle
+    }
+  }, [])
+
+  function handleSubmit(event) {
+    event.preventDefault()
+
+    const normalizedEmail = email.trim()
+    const normalizedPhone = phone.trim()
+
+    if (!normalizedEmail && !normalizedPhone) {
+      setStatus({
+        tone: 'error',
+        message: 'Enter an email address, a phone number, or both before submitting.',
+      })
+      return
+    }
+
+    if (normalizedPhone && !smsConsent) {
+      setStatus({
+        tone: 'error',
+        message: 'Check the SMS consent box before submitting a phone number.',
+      })
+      return
+    }
+
+    setStatus({
+      tone: 'success',
+      message:
+        'Placeholder received. The production signup endpoint is not live yet, so this preview did not store or send anything.',
+    })
+  }
+
+  return (
+    <>
+      <div className="background-wallpaper" style={{ backgroundImage: `url("${BACKGROUND_URL}")` }} aria-hidden="true" />
+      <main className="app-shell signup-shell">
+        <section className="focus-grid signup-grid">
+          <section className="panel hero-copy-panel signup-copy-panel">
+            <h1>Apocalypse Notifications</h1>
+            <p className="hero-caption">
+              Get notified when the emergency level reaches 5. This preview shows the planned opt-in flow for SMS and
+              email alerts before Stripe payments and notification storage are connected.
+            </p>
+            <p>
+              The live subscription will cost $5 per year. No payment is collected here, and this placeholder does not
+              add you to a notification list yet.
+            </p>
+            <p className="hero-credit">
+              <a href="/">Dashboard</a>{' '}
+              /{' '}
+              <a href="https://t.me/apocalypse_ews" target="_blank" rel="noreferrer">
+                Telegram Notifications
+              </a>{' '}
+              /{' '}
+              <a href="https://ews.kylemcdonald.net/rss.xml" target="_blank" rel="noreferrer">
+                RSS
+              </a>
+            </p>
+          </section>
+
+          <section className="panel signup-panel" aria-labelledby="signup-form-title">
+            <div className="panel-header">
+              <div>
+                <h2 id="signup-form-title">Notification Signup</h2>
+              </div>
+            </div>
+            <form className="signup-form" onSubmit={handleSubmit}>
+              <label className="signup-field">
+                <span>Email address</span>
+                <input
+                  type="email"
+                  name="email"
+                  value={email}
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+              </label>
+
+              <label className="signup-field">
+                <span>Phone number</span>
+                <input
+                  type="tel"
+                  name="phone"
+                  value={phone}
+                  autoComplete="tel"
+                  inputMode="tel"
+                  placeholder="+1 555 123 4567"
+                  onChange={(event) => setPhone(event.target.value)}
+                />
+              </label>
+
+              <label className="signup-consent">
+                <input
+                  type="checkbox"
+                  checked={smsConsent}
+                  onChange={(event) => setSmsConsent(event.target.checked)}
+                />
+                <span>
+                  I agree to receive automated SMS emergency alerts from Apocalypse Early Warning System at the phone
+                  number provided. Message frequency varies. Message and data rates may apply. Reply STOP to cancel or
+                  HELP for help.
+                </span>
+              </label>
+
+              <button className="signup-submit" type="submit">
+                Submit Signup
+              </button>
+
+              {status ? (
+                <p className={`signup-status signup-status-${status.tone}`} role="status">
+                  {status.message}
+                </p>
+              ) : null}
+            </form>
+          </section>
+        </section>
+
+        <section className="panel about-panel signup-architecture-panel">
+          <div className="panel-header">
+            <div>
+              <h2>Storage Placeholder</h2>
+            </div>
+          </div>
+          <div className="about-copy">
+            <p>
+              The recommended production architecture is a private server endpoint backed by Cloudflare D1, matching the
+              current Cloudflare Pages deployment. The signup table should store email, phone, selected channels, Stripe
+              customer and subscription IDs, payment status, opt-in timestamp, consent copy version, Twilio opt-out
+              state, and the minimum audit metadata needed to prove consent.
+            </p>
+            <p>
+              The database should never be published with the static site or placed in R2. Public requests should only be
+              able to create or update their own signup through the endpoint; any admin access should be behind
+              Cloudflare Access or kept out of the public app entirely. Stripe webhooks can activate yearly subscriptions,
+              and Twilio webhooks can record STOP and HELP events before alert jobs send SMS or email.
+            </p>
+          </div>
+        </section>
+      </main>
+    </>
+  )
+}
+
 function DashboardApp({ dashboardUrl = DASHBOARD_URL }) {
   const [dashboard, setDashboard] = useState(null)
   const [error, setError] = useState(null)
@@ -2134,6 +2312,7 @@ function DashboardApp({ dashboardUrl = DASHBOARD_URL }) {
               <a href="https://github.com/kylemcdonald/ews" target="_blank" rel="noreferrer">
                 GitHub
               </a>{' '}
+              / <a href="/signup/">SMS/Email Signup</a>{' '}
               /{' '}
               <a href="https://t.me/apocalypse_ews" target="_blank" rel="noreferrer">
                 Telegram Notifications
@@ -2179,6 +2358,10 @@ function DashboardApp({ dashboardUrl = DASHBOARD_URL }) {
 }
 
 function App() {
+  if (window.location.pathname === '/signup' || window.location.pathname.startsWith('/signup/')) {
+    return <SignupPage />
+  }
+
   if (window.location.pathname === '/beta' || window.location.pathname.startsWith('/beta/')) {
     return <DashboardApp dashboardUrl={BETA_DASHBOARD_URL} />
   }
