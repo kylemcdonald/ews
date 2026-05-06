@@ -2801,7 +2801,7 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null }) {
     }
 
     map.on('zoom', updateZoomState)
-    map.on('move', enforceBounds)
+    map.on('moveend', enforceBounds)
     map.on('load', async () => {
       try {
         await addMapLibreAircraftImages(map)
