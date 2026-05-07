@@ -59,37 +59,78 @@ const MAPLIBRE_WORLD_BOUNDS = [[-180, -65.542], [180, 65.542]]
 const MAPLIBRE_CONUS_GEOGRAPHIC_BOUNDS = [[-124.85, 24.4], [-66.9, 49.6]]
 const MAPLIBRE_WORLD_FIT_PADDING = 12
 const MAPLIBRE_EQUAL_EARTH_GRID_FACTOR = 20037508.3427892 / 17243959.06
-const MAPLIBRE_SOUTHERN_MOROCCO_LAYER_MAX_ZOOM = 5
-// The bbox Equal Earth vector tiles omit this small MAR coastal polygon at low zooms.
-const SOUTHERN_MOROCCO_GEOGRAPHIC_POLYGON = [
-  [
-    [-11.92058, 28.050922],
-    [-11.89594, 27.556836],
-    [-13.17865, 27.556836],
-    [-13.17871, 27.557923],
-    [-13.177435, 27.561184],
-    [-13.171182, 27.579663],
-    [-13.160094, 27.589447],
-    [-13.130296, 27.602493],
-    [-13.09818, 27.626413],
-    [-13.060991, 27.637287],
-    [-13.044497, 27.654686],
-    [-13.002747, 27.715594],
-    [-12.979023, 27.787402],
-    [-12.968513, 27.808079],
-    [-12.95183, 27.822228],
-    [-12.933514, 27.833112],
-    [-12.839228, 27.86468],
-    [-12.657402, 27.891897],
-    [-12.513272, 27.88972],
-    [-12.335545, 27.940898],
-    [-12.061196, 27.982286],
-    [-12.049942, 27.989911],
-    [-12.027707, 28.010609],
-    [-12.023452, 28.012788],
-    [-12.006207, 28.017146],
-    [-11.92058, 28.050922],
-  ],
+// These polygons match high-zoom bbox country fills that disappear from lower-zoom tiles.
+const SUPPLEMENTAL_COUNTRY_FILL_GEOGRAPHIC_POLYGONS = [
+  {
+    id: 'western-sahara',
+    adm0_a3: 'SAH',
+    rings: [
+      [
+        [-8.66559, 27.656426],
+        [-8.665124, 27.589479],
+        [-8.6844, 27.395744],
+        [-8.687294, 25.881056],
+        [-11.969419, 25.933353],
+        [-11.937224, 23.374594],
+        [-12.874222, 23.284832],
+        [-13.118754, 22.77122],
+        [-12.929102, 21.327071],
+        [-16.845194, 21.333323],
+        [-17.063423, 20.999752],
+        [-17.020428, 21.42231],
+        [-17.002962, 21.420734],
+        [-14.750955, 21.5006],
+        [-14.630833, 21.86094],
+        [-14.221168, 22.310163],
+        [-13.89111, 23.691009],
+        [-12.500963, 24.770116],
+        [-12.030759, 26.030866],
+        [-11.71822, 26.104092],
+        [-11.392555, 26.883424],
+        [-10.551263, 26.990808],
+        [-10.189424, 26.860945],
+        [-9.735343, 26.860945],
+        [-9.413037, 27.088476],
+        [-8.794884, 27.120696],
+        [-8.817828, 27.656426],
+        [-8.66559, 27.656426],
+      ],
+    ],
+  },
+  {
+    id: 'southern-morocco',
+    adm0_a3: 'MAR',
+    rings: [
+      [
+        [-11.92058, 28.050922],
+        [-11.89594, 27.556836],
+        [-13.17865, 27.556836],
+        [-13.17871, 27.557923],
+        [-13.177435, 27.561184],
+        [-13.171182, 27.579663],
+        [-13.160094, 27.589447],
+        [-13.130296, 27.602493],
+        [-13.09818, 27.626413],
+        [-13.060991, 27.637287],
+        [-13.044497, 27.654686],
+        [-13.002747, 27.715594],
+        [-12.979023, 27.787402],
+        [-12.968513, 27.808079],
+        [-12.95183, 27.822228],
+        [-12.933514, 27.833112],
+        [-12.839228, 27.86468],
+        [-12.657402, 27.891897],
+        [-12.513272, 27.88972],
+        [-12.335545, 27.940898],
+        [-12.061196, 27.982286],
+        [-12.049942, 27.989911],
+        [-12.027707, 28.010609],
+        [-12.023452, 28.012788],
+        [-12.006207, 28.017146],
+        [-11.92058, 28.050922],
+      ],
+    ],
+  },
 ]
 const EMERGENCY_LEVEL_COUNT = 5
 const EMERGENCY_SCHEME_TAP_WINDOW_MS = 700
@@ -2359,18 +2400,18 @@ function createEqualEarthSphere() {
   }
 }
 
-function createSouthernMoroccoFeatureCollection() {
+function createSupplementalCountryFillFeatureCollection() {
   return {
     type: 'FeatureCollection',
-    features: [
-      createEqualEarthPolygonFeature('southern-morocco', SOUTHERN_MOROCCO_GEOGRAPHIC_POLYGON, { adm0_a3: 'MAR' }),
-    ],
+    features: SUPPLEMENTAL_COUNTRY_FILL_GEOGRAPHIC_POLYGONS.map((feature) =>
+      createEqualEarthPolygonFeature(feature.id, feature.rings, { adm0_a3: feature.adm0_a3 }),
+    ),
   }
 }
 
 const MAPLIBRE_GRATICULE_FEATURE_COLLECTION = createEqualEarthGraticule()
 const MAPLIBRE_SPHERE_FEATURE_COLLECTION = createEqualEarthSphere()
-const MAPLIBRE_SOUTHERN_MOROCCO_FEATURE_COLLECTION = createSouthernMoroccoFeatureCollection()
+const MAPLIBRE_SUPPLEMENTAL_COUNTRY_FILL_FEATURE_COLLECTION = createSupplementalCountryFillFeatureCollection()
 
 function createMapLibreEqualEarthStyle() {
   return {
@@ -2384,9 +2425,9 @@ function createMapLibreEqualEarthStyle() {
         type: 'geojson',
         data: MAPLIBRE_GRATICULE_FEATURE_COLLECTION,
       },
-      'equal-earth-southern-morocco': {
+      'equal-earth-supplemental-country-fill': {
         type: 'geojson',
-        data: MAPLIBRE_SOUTHERN_MOROCCO_FEATURE_COLLECTION,
+        data: MAPLIBRE_SUPPLEMENTAL_COUNTRY_FILL_FEATURE_COLLECTION,
       },
       countries: {
         type: 'vector',
@@ -2430,10 +2471,9 @@ function createMapLibreEqualEarthStyle() {
         },
       },
       {
-        id: 'equal-earth-southern-morocco-fill',
+        id: 'equal-earth-supplemental-country-fill',
         type: 'fill',
-        source: 'equal-earth-southern-morocco',
-        maxzoom: MAPLIBRE_SOUTHERN_MOROCCO_LAYER_MAX_ZOOM,
+        source: 'equal-earth-supplemental-country-fill',
         paint: {
           'fill-color': '#f2f2f2',
         },
