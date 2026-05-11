@@ -300,7 +300,7 @@ function useMap(containerRef, onClusterClick) {
     if (!containerRef.current || mapRef.current) return undefined
 
     if (!canUseWebGl()) {
-      setMapError(new Error('WebGL is unavailable.'))
+      queueMicrotask(() => setMapError(new Error('WebGL is unavailable.')))
       return undefined
     }
 
@@ -315,7 +315,7 @@ function useMap(containerRef, onClusterClick) {
         cooperativeGestures: true,
       })
     } catch (error) {
-      setMapError(error)
+      queueMicrotask(() => setMapError(error))
       return undefined
     }
 
@@ -821,8 +821,10 @@ function EventSignalExplainer() {
       })
       .then((nextPayload) => {
         if (cancelled) return
+        const firstResult = nextPayload.results?.[0] || null
         setPayload(nextPayload)
-        setSelectedKey(nextPayload.results?.[0]?.key || null)
+        setSelectedKey(firstResult?.key || null)
+        setMode(firstResult ? getPrimaryMode(firstResult) : 'takeoff')
       })
       .catch((nextError) => {
         if (!cancelled) setError(nextError)
@@ -832,17 +834,19 @@ function EventSignalExplainer() {
     }
   }, [])
 
-  const results = payload?.results || []
+  const results = useMemo(() => payload?.results || [], [payload])
   const selectedResult = useMemo(
     () => results.find((result) => result.key === selectedKey) || results[0] || null,
     [results, selectedKey],
   )
 
-  useEffect(() => {
-    if (selectedResult) {
-      setMode(getPrimaryMode(selectedResult))
+  function selectResultKey(nextKey) {
+    const nextResult = results.find((result) => result.key === nextKey) || results[0] || null
+    setSelectedKey(nextKey)
+    if (nextResult) {
+      setMode(getPrimaryMode(nextResult))
     }
-  }, [selectedResult?.key])
+  }
 
   if (error) {
     return (
@@ -891,7 +895,7 @@ function EventSignalExplainer() {
         <aside className="explainer-sidebar">
           <div className="explainer-panel">
             <h2>Validation cases</h2>
-            <EventList results={results} selectedKey={selectedResult.key} onSelect={setSelectedKey} />
+            <EventList results={results} selectedKey={selectedResult.key} onSelect={selectResultKey} />
           </div>
           <div className="explainer-panel">
             <h2>Detector pipeline</h2>
@@ -907,7 +911,7 @@ function EventSignalExplainer() {
                 <p>Click a cluster to select a case. Circles show each case's strongest endpoint or fallback cell evidence.</p>
               </div>
             </div>
-            <OverviewMap results={results} selectedKey={selectedResult.key} mode={mode} onSelect={setSelectedKey} />
+            <OverviewMap results={results} selectedKey={selectedResult.key} mode={mode} onSelect={selectResultKey} />
           </section>
 
           <section className="explainer-panel selected-event-panel">
@@ -968,7 +972,7 @@ function EventSignalExplainer() {
                 <p>Bars show the selected primary endpoint cluster delta for each validation case, with cell fallback when needed.</p>
               </div>
             </div>
-            <EvidenceChart results={results} onSelect={setSelectedKey} />
+            <EvidenceChart results={results} onSelect={selectResultKey} />
           </section>
         </div>
       </section>
