@@ -125,6 +125,12 @@ jobs:
       - name: Export published untracked dashboard snapshot
         run: node scripts/export_dashboard_snapshot.js --db "${UNTRACKED_DB_PATH}" --output tmp/untracked-dashboard.json --endpoint untracked --cohort non_icao_untracked
 
+      - name: Compress published dashboard snapshots
+        run: |
+          gzip -cn tmp/dashboard.json > tmp/dashboard.json.gz
+          gzip -cn tmp/military-dashboard.json > tmp/military-dashboard.json.gz
+          gzip -cn tmp/untracked-dashboard.json > tmp/untracked-dashboard.json.gz
+
       - name: Send Telegram emergency alert
         run: EWS_DB_PATH="${MAIN_DB_PATH}" node scripts/send_telegram_alert.js
 
@@ -224,9 +230,10 @@ jobs:
         run: |
           for attempt in 1 2 3 4 5; do
             if npx wrangler r2 object put "${PUBLIC_BUCKET}/dashboard.json" \
-              --file tmp/dashboard.json \
+              --file tmp/dashboard.json.gz \
               --remote \
               --content-type application/json \
+              --content-encoding gzip \
               --cache-control "public, max-age=300"; then
               exit 0
             fi
@@ -241,9 +248,10 @@ jobs:
         run: |
           for attempt in 1 2 3 4 5; do
             if npx wrangler r2 object put "${PUBLIC_BUCKET}/military-dashboard.json" \
-              --file tmp/military-dashboard.json \
+              --file tmp/military-dashboard.json.gz \
               --remote \
               --content-type application/json \
+              --content-encoding gzip \
               --cache-control "public, max-age=300"; then
               exit 0
             fi
@@ -258,9 +266,10 @@ jobs:
         run: |
           for attempt in 1 2 3 4 5; do
             if npx wrangler r2 object put "${PUBLIC_BUCKET}/untracked-dashboard.json" \
-              --file tmp/untracked-dashboard.json \
+              --file tmp/untracked-dashboard.json.gz \
               --remote \
               --content-type application/json \
+              --content-encoding gzip \
               --cache-control "public, max-age=300"; then
               exit 0
             fi

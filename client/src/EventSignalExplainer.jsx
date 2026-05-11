@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import maplibregl from 'maplibre-gl'
+import maplibregl from './loadMapLibre.js'
 import {
   Bar,
   BarChart,

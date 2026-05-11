@@ -1,9 +1,8 @@
-import { startTransition, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
-import maplibregl from 'maplibre-gl'
+import { Suspense, lazy, startTransition, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import proj4 from 'proj4'
-import 'maplibre-gl/dist/maplibre-gl.css'
 import './App.css'
-import EventSignalExplainer from './EventSignalExplainer.jsx'
+
+const EventSignalExplainer = lazy(() => import('./EventSignalExplainer.jsx'))
 
 const PUBLIC_DASHBOARD_BASE_URL = 'https://pub-49bb6a6f314c47be9b481c25e5f6ca9e.r2.dev'
 const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || `${PUBLIC_DASHBOARD_BASE_URL}/dashboard.json`
@@ -2768,7 +2767,25 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null }) {
 
     let cancelled = false
     let map
-    try {
+    let resizeObserver
+
+    async function initializeMap() {
+      let maplibregl
+      try {
+        maplibregl = (await import('./loadMapLibre.js')).default
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Unable to load MapLibre', error)
+          setMapError('MapLibre could not load in this browser.')
+        }
+        return
+      }
+
+      if (cancelled || !mapContainerRef.current) {
+        return
+      }
+
+      try {
       map = new maplibregl.Map({
         container: mapContainerRef.current,
         style: createMapLibreEqualEarthStyle(),
@@ -2780,143 +2797,146 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null }) {
         pitchWithRotate: false,
         maxPitch: 0,
       })
-    } catch (error) {
-      console.error('Unable to initialize MapLibre map', error)
-      queueMicrotask(() => setMapError('MapLibre could not initialize WebGL in this browser.'))
-      return undefined
-    }
-
-    mapRef.current = map
-    map.touchZoomRotate.disableRotation()
-
-    const updateZoomState = () => {
-      setMapZoom(map.getZoom())
-    }
-    const enforceBounds = () => {
-      enforceMapLibreBounds(map, minZoomRef.current, clampingRef)
-    }
-
-    map.on('zoom', updateZoomState)
-    map.on('moveend', enforceBounds)
-    map.on('load', async () => {
-      try {
-        await addMapLibreAircraftImages(map)
       } catch (error) {
-        console.error('Unable to add aircraft icons to MapLibre map', error)
-      }
-
-      if (cancelled) {
+        console.error('Unable to initialize MapLibre map', error)
+        queueMicrotask(() => setMapError('MapLibre could not initialize WebGL in this browser.'))
         return
       }
 
-      map.addSource(MAPLIBRE_AIRCRAFT_SOURCE_ID, {
-        type: 'geojson',
-        data: aircraftFeatureCollectionRef.current,
-        promoteId: 'markerId',
-      })
-      map.addLayer({
-        id: MAPLIBRE_AIRCRAFT_HALO_LAYER_ID,
-        type: 'circle',
-        source: MAPLIBRE_AIRCRAFT_SOURCE_ID,
-        paint: {
-          'circle-color': '#cc0000',
-          'circle-radius': [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            0,
-            ['case', ['==', ['get', 'active'], true], 10, 0],
-            3,
-            ['case', ['==', ['get', 'active'], true], 18, 0],
-            5,
-            ['case', ['==', ['get', 'active'], true], 24, 0],
-          ],
-          'circle-opacity': [
-            'case',
-            ['==', ['get', 'active'], true],
-            0.12,
-            0,
-          ],
-          'circle-stroke-width': 0,
-        },
-      })
-      map.addLayer({
-        id: MAPLIBRE_AIRCRAFT_ICON_LAYER_ID,
-        type: 'symbol',
-        source: MAPLIBRE_AIRCRAFT_SOURCE_ID,
-        layout: {
-          'icon-image': ['get', 'icon'],
-          'icon-size': [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            0,
-            ['case', ['==', ['get', 'active'], true], 1.36, 1.1],
-            3,
-            ['case', ['==', ['get', 'active'], true], 1.89, 1.58],
-            5,
-            ['case', ['==', ['get', 'active'], true], 2.42, 2.02],
-          ],
-          'icon-rotate': ['get', 'rotation'],
-          'icon-rotation-alignment': 'map',
-          'icon-allow-overlap': true,
-          'icon-ignore-placement': true,
-          'symbol-sort-key': ['get', 'sortKey'],
-        },
-        paint: {
-          'icon-opacity': 0.96,
-        },
-      })
+      mapRef.current = map
+      map.touchZoomRotate.disableRotation()
 
-      fitMapLibreWorld(map, minZoomRef, setMapZoom, setMapMinZoom, {
-        initialBounds: isNarrowLayout ? MAPLIBRE_CONUS_BOUNDS : MAPLIBRE_WORLD_BOUNDS,
-      })
+      const updateZoomState = () => {
+        setMapZoom(map.getZoom())
+      }
+      const enforceBounds = () => {
+        enforceMapLibreBounds(map, minZoomRef.current, clampingRef)
+      }
 
-      map.on('mousemove', MAPLIBRE_AIRCRAFT_ICON_LAYER_ID, (event) => {
-        const markerId = event.features?.[0]?.properties?.markerId
-        map.getCanvas().style.cursor = markerId ? 'pointer' : ''
-        setHoveredMarkerId((currentMarkerId) => (currentMarkerId === markerId ? currentMarkerId : markerId || null))
-      })
-      map.on('mouseleave', MAPLIBRE_AIRCRAFT_ICON_LAYER_ID, () => {
-        map.getCanvas().style.cursor = ''
-        setHoveredMarkerId(null)
-      })
-      map.on('click', MAPLIBRE_AIRCRAFT_ICON_LAYER_ID, (event) => {
-        const markerId = event.features?.[0]?.properties?.markerId
-        if (markerId) {
-          setSelectedMarkerId(markerId)
+      map.on('zoom', updateZoomState)
+      map.on('moveend', enforceBounds)
+      map.on('load', async () => {
+        try {
+          await addMapLibreAircraftImages(map)
+        } catch (error) {
+          console.error('Unable to add aircraft icons to MapLibre map', error)
         }
-      })
-      map.on('click', (event) => {
-        const features = map.queryRenderedFeatures(event.point, {
-          layers: [MAPLIBRE_AIRCRAFT_ICON_LAYER_ID],
-        })
-        if (!features.length) {
-          setSelectedMarkerId(null)
-        }
-      })
-    })
 
-    const resizeObserver = new ResizeObserver(() => {
-      window.requestAnimationFrame(() => {
         if (cancelled) {
           return
         }
-        map.resize()
-        fitMapLibreWorld(map, minZoomRef, setMapZoom, setMapMinZoom, { preserveZoom: true })
-        enforceMapLibreBounds(map, minZoomRef.current, clampingRef)
+
+        map.addSource(MAPLIBRE_AIRCRAFT_SOURCE_ID, {
+          type: 'geojson',
+          data: aircraftFeatureCollectionRef.current,
+          promoteId: 'markerId',
+        })
+        map.addLayer({
+          id: MAPLIBRE_AIRCRAFT_HALO_LAYER_ID,
+          type: 'circle',
+          source: MAPLIBRE_AIRCRAFT_SOURCE_ID,
+          paint: {
+            'circle-color': '#cc0000',
+            'circle-radius': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              0,
+              ['case', ['==', ['get', 'active'], true], 10, 0],
+              3,
+              ['case', ['==', ['get', 'active'], true], 18, 0],
+              5,
+              ['case', ['==', ['get', 'active'], true], 24, 0],
+            ],
+            'circle-opacity': [
+              'case',
+              ['==', ['get', 'active'], true],
+              0.12,
+              0,
+            ],
+            'circle-stroke-width': 0,
+          },
+        })
+        map.addLayer({
+          id: MAPLIBRE_AIRCRAFT_ICON_LAYER_ID,
+          type: 'symbol',
+          source: MAPLIBRE_AIRCRAFT_SOURCE_ID,
+          layout: {
+            'icon-image': ['get', 'icon'],
+            'icon-size': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              0,
+              ['case', ['==', ['get', 'active'], true], 1.36, 1.1],
+              3,
+              ['case', ['==', ['get', 'active'], true], 1.89, 1.58],
+              5,
+              ['case', ['==', ['get', 'active'], true], 2.42, 2.02],
+            ],
+            'icon-rotate': ['get', 'rotation'],
+            'icon-rotation-alignment': 'map',
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+            'symbol-sort-key': ['get', 'sortKey'],
+          },
+          paint: {
+            'icon-opacity': 0.96,
+          },
+        })
+
+        fitMapLibreWorld(map, minZoomRef, setMapZoom, setMapMinZoom, {
+          initialBounds: isNarrowLayout ? MAPLIBRE_CONUS_BOUNDS : MAPLIBRE_WORLD_BOUNDS,
+        })
+
+        map.on('mousemove', MAPLIBRE_AIRCRAFT_ICON_LAYER_ID, (event) => {
+          const markerId = event.features?.[0]?.properties?.markerId
+          map.getCanvas().style.cursor = markerId ? 'pointer' : ''
+          setHoveredMarkerId((currentMarkerId) => (currentMarkerId === markerId ? currentMarkerId : markerId || null))
+        })
+        map.on('mouseleave', MAPLIBRE_AIRCRAFT_ICON_LAYER_ID, () => {
+          map.getCanvas().style.cursor = ''
+          setHoveredMarkerId(null)
+        })
+        map.on('click', MAPLIBRE_AIRCRAFT_ICON_LAYER_ID, (event) => {
+          const markerId = event.features?.[0]?.properties?.markerId
+          if (markerId) {
+            setSelectedMarkerId(markerId)
+          }
+        })
+        map.on('click', (event) => {
+          const features = map.queryRenderedFeatures(event.point, {
+            layers: [MAPLIBRE_AIRCRAFT_ICON_LAYER_ID],
+          })
+          if (!features.length) {
+            setSelectedMarkerId(null)
+          }
+        })
       })
-    })
-    resizeObserver.observe(mapContainerRef.current)
+
+      resizeObserver = new ResizeObserver(() => {
+        window.requestAnimationFrame(() => {
+          if (cancelled) {
+            return
+          }
+          map.resize()
+          fitMapLibreWorld(map, minZoomRef, setMapZoom, setMapMinZoom, { preserveZoom: true })
+          enforceMapLibreBounds(map, minZoomRef.current, clampingRef)
+        })
+      })
+      resizeObserver.observe(mapContainerRef.current)
+    }
+
+    initializeMap()
 
     return () => {
       cancelled = true
-      resizeObserver.disconnect()
-      if (programmaticZoomEndRef.current) {
+      resizeObserver?.disconnect()
+      if (programmaticZoomEndRef.current && map) {
         map.off('moveend', programmaticZoomEndRef.current)
         programmaticZoomEndRef.current = null
       }
-      map.remove()
+      map?.remove()
       if (mapRef.current === map) {
         mapRef.current = null
       }
@@ -4726,7 +4746,11 @@ function DashboardApp({ dashboardUrl = DASHBOARD_URL, enableCohortControls = fal
 
 function App() {
   if (window.location.pathname === '/event-signals' || window.location.pathname.startsWith('/event-signals/')) {
-    return <EventSignalExplainer />
+    return (
+      <Suspense fallback={null}>
+        <EventSignalExplainer />
+      </Suspense>
+    )
   }
 
   if (

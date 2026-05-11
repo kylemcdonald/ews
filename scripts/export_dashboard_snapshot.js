@@ -82,7 +82,7 @@ function main() {
     },
   };
   fs.mkdirSync(path.dirname(output), { recursive: true });
-  fs.writeFileSync(output, `${JSON.stringify(snapshot, null, 2)}\n`);
+  fs.writeFileSync(output, `${JSON.stringify(snapshot)}\n`);
   console.log(
     JSON.stringify({
       ok: true,

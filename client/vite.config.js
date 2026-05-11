@@ -83,6 +83,11 @@ function inlineEntryBootstrap() {
           JSON.stringify(preloadDependencies),
         )
 
+        for (const importedFileName of entryChunk.imports ?? []) {
+          const importedBaseName = importedFileName.split('/').at(-1)
+          entryCode = rewriteInlinedRelativeImport(entryCode, importedBaseName, `/${importedFileName}`)
+        }
+
         for (const dynamicImport of entryChunk.dynamicImports ?? []) {
           const importedFileName = dynamicImport.split('/').at(-1)
 
@@ -106,6 +111,16 @@ function inlineEntryBootstrap() {
       htmlAsset.source = html
     },
   }
+}
+
+function rewriteInlinedRelativeImport(code, importedBaseName, publicPath) {
+  const escapedBaseName = importedBaseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const importSpecifierPattern = new RegExp(
+    `((?:from|import)\\s*["'\`])\\./${escapedBaseName}(["'\`])`,
+    'g',
+  )
+
+  return code.replace(importSpecifierPattern, `$1${publicPath}$2`)
 }
 
 function getPreloadDependencies(entryChunk, bundle) {
