@@ -13,7 +13,7 @@ import { HttpError } from "./http.js";
 import { sendTelnyxMessage } from "./telnyx.js";
 
 const LEVEL5_COOLDOWN_META_KEY = "level5_notification_last_sent_at";
-const DEFAULT_ALERT_URL = "https://ews.kylemcdonald.net/";
+const DEFAULT_NOTIFICATION_URL = "https://aews.cc/";
 const LEVEL5_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 function formatCount(value) {
@@ -59,7 +59,7 @@ export function getEmergencyLevel(snapshot) {
   return Math.round(Number(getEmergencySnapshotSignal(snapshot)?.emergencyLevel || 1));
 }
 
-export function formatEmergencyNotification(snapshot, { test = false, alertUrl = DEFAULT_ALERT_URL } = {}) {
+export function formatEmergencyNotification(snapshot, { test = false, alertUrl = DEFAULT_NOTIFICATION_URL } = {}) {
   const signal = getEmergencySnapshotSignal(snapshot);
   const actualCount = Number(signal?.actualConcurrentCount ?? snapshot?.current?.concurrentCount ?? 0);
   const expectedCount = Number(signal?.expectedConcurrentCount ?? snapshot?.current?.baselineMean ?? 0);
@@ -72,7 +72,7 @@ export function formatEmergencyNotification(snapshot, { test = false, alertUrl =
 }
 
 function getAlertUrl(env) {
-  return String(env.EWS_PUBLIC_URL || DEFAULT_ALERT_URL).trim() || DEFAULT_ALERT_URL;
+  return String(env.EWS_NOTIFICATION_URL || DEFAULT_NOTIFICATION_URL).trim() || DEFAULT_NOTIFICATION_URL;
 }
 
 async function appendCustomerPortalLink(env, subscriber, messageText) {

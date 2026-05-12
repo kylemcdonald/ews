@@ -175,6 +175,7 @@ In the Cloudflare Pages project, add a D1 binding named `EWS_NOTIFY_DB` pointing
 ```text
 APP_BASE_URL=https://ews.kylemcdonald.net
 EWS_PUBLIC_URL=https://ews.kylemcdonald.net/
+EWS_NOTIFICATION_URL=https://aews.cc/
 STRIPE_SECRET_KEY=...
 STRIPE_WEBHOOK_SECRET=...
 STRIPE_PRODUCT_ID=prod_USlMnoY4GL7OAn
@@ -192,7 +193,7 @@ NOTIFICATION_HASH_SECRET=...
 NOTIFICATION_ENCRYPTION_KEY=...
 ```
 
-`STRIPE_PRICE_ID` is optional. If it is blank, the signup function resolves the active `$5/year` price for `STRIPE_PRODUCT_ID`. `TELNYX_NUMBER` is the E.164 sender number. `TELNYX_PUBLIC_KEY` is required to process webhooks and is available in the Telnyx Mission Control Portal under Keys & Credentials. Without it, webhooks are acknowledged but ignored. `TELNYX_WEBHOOK_URL` is optional; if it is blank, outbound SMS sends use `${APP_BASE_URL}/api/telnyx/webhook` for delivery callbacks. Generate `NOTIFICATION_ENCRYPTION_KEY` with:
+`STRIPE_PRICE_ID` is optional. If it is blank, the signup function resolves the active `$5/year` price for `STRIPE_PRODUCT_ID`. `EWS_NOTIFICATION_URL` controls the short dashboard URL used in SMS and email alert bodies; keep `APP_BASE_URL` and `EWS_PUBLIC_URL` on the canonical hostname. `TELNYX_NUMBER` is the E.164 sender number. `TELNYX_PUBLIC_KEY` is required to process webhooks and is available in the Telnyx Mission Control Portal under Keys & Credentials. Without it, webhooks are acknowledged but ignored. `TELNYX_WEBHOOK_URL` is optional; if it is blank, outbound SMS sends use `${APP_BASE_URL}/api/telnyx/webhook` for delivery callbacks. Generate `NOTIFICATION_ENCRYPTION_KEY` with:
 
 ```bash
 openssl rand -base64 32
