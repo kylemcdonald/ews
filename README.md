@@ -182,25 +182,23 @@ STRIPE_PRICE_ID=...
 SENDGRID_API_KEY=...
 SENDGRID_FROM_EMAIL=alerts@your-domain.example
 SENDGRID_FROM_NAME=Apocalypse EWS
-TWILIO_ACCOUNT_SID=...
-TWILIO_AUTH_TOKEN=...
-TWILIO_API_KEY_SID=...
-TWILIO_API_KEY_SECRET=...
-TWILIO_FROM_PHONE=+1...
-TWILIO_MESSAGING_SERVICE_SID=...
-TWILIO_STATUS_CALLBACK_URL=...
+TELNYX_API_KEY=...
+TELNYX_NUMBER=+1...
+TELNYX_PUBLIC_KEY=...
+TELNYX_WEBHOOK_URL=
+TELNYX_WEBHOOK_FAILOVER_URL=
 INTERNAL_ALERT_TOKEN=...
 NOTIFICATION_HASH_SECRET=...
 NOTIFICATION_ENCRYPTION_KEY=...
 ```
 
-`STRIPE_PRICE_ID` is optional. If it is blank, the signup function resolves the active `$5/year` price for `STRIPE_PRODUCT_ID`. For Twilio authentication, use either `TWILIO_AUTH_TOKEN` or `TWILIO_API_KEY_SID`/`TWILIO_API_KEY_SECRET`. For SMS sending, use either `TWILIO_FROM_PHONE` or a real `MG...` `TWILIO_MESSAGING_SERVICE_SID`. `TWILIO_STATUS_CALLBACK_URL` is optional; if it is blank, production SMS sends use `${EWS_PUBLIC_URL}/api/twilio/status-callback`. Generate `NOTIFICATION_ENCRYPTION_KEY` with:
+`STRIPE_PRICE_ID` is optional. If it is blank, the signup function resolves the active `$5/year` price for `STRIPE_PRODUCT_ID`. `TELNYX_NUMBER` is the E.164 sender number. `TELNYX_PUBLIC_KEY` is required to process webhooks and is available in the Telnyx Mission Control Portal under Keys & Credentials. Without it, webhooks are acknowledged but ignored. `TELNYX_WEBHOOK_URL` is optional; if it is blank, outbound SMS sends use `${APP_BASE_URL}/api/telnyx/webhook` for delivery callbacks. Generate `NOTIFICATION_ENCRYPTION_KEY` with:
 
 ```bash
 openssl rand -base64 32
 ```
 
-For local testing, copy `.dev.vars.example` to `.dev.vars` and fill the same values. This workspace already has ignored local scaffolding in `.dev.vars` and `wrangler.toml`; replace the blank SendGrid, Twilio, and Stripe webhook values before testing end to end.
+For local testing, copy `.dev.vars.example` to `.dev.vars` and fill the same values. This workspace already has ignored local scaffolding in `.dev.vars` and `wrangler.toml`; replace the blank SendGrid, Telnyx, and Stripe webhook values before testing end to end.
 
 Run the local Pages app with Functions and local D1:
 
@@ -226,13 +224,19 @@ Subscribe it to `checkout.session.completed`, `checkout.session.expired`, `custo
 
 The scheduled refresh workflows call `/api/internal/level5-alert` after dashboard export. Add a GitHub repository secret named `EWS_INTERNAL_ALERT_TOKEN` with the same value as the Cloudflare Pages `INTERNAL_ALERT_TOKEN` secret. SMS/email alerts send only for emergency level 5 and are globally cooled down for 24 hours.
 
-For Twilio toll-free numbers, configure the number's incoming SMS webhook to:
+For Telnyx SMS, configure the messaging profile's webhook URL to:
 
 ```text
-https://ews.kylemcdonald.net/api/twilio/inbound-sms
+https://ews.kylemcdonald.net/api/telnyx/webhook
 ```
 
-The app records Twilio delivery callbacks in D1. A Twilio `30032` delivery error means the toll-free number is still restricted or pending verification, so US/Canada delivery is blocked until Twilio approves the toll-free verification.
+If you want to use the short domain as the failover URL, set:
+
+```text
+https://aews.cc/api/telnyx/webhook
+```
+
+The app records Telnyx `message.sent` and `message.finalized` callbacks in D1. Inbound `message.received` callbacks process STOP/START/HELP replies and update SMS preferences.
 
 ### Telegram emergency alerts
 

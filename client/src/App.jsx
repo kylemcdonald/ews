@@ -4250,7 +4250,7 @@ function AdminTestAlertPage() {
                     <h3>SMS Sender</h3>
                     <p>
                       {messagingStatusLoading
-                        ? 'Checking Twilio...'
+                        ? 'Checking Telnyx...'
                         : messagingStatus?.checkedAt
                           ? `Checked ${new Date(messagingStatus.checkedAt).toLocaleString()}`
                           : 'Status not loaded'}
@@ -4268,19 +4268,21 @@ function AdminTestAlertPage() {
                     <div className="messaging-status-grid">
                       <span>Ready: {messagingStatus.readyForSms ? 'yes' : 'no'}</span>
                       <span>Send method: {formatMessagingStatusLabel(messagingStatus.sendMethod)}</span>
-                      <span>Messaging service: {formatMessagingStatusLabel(messagingStatus.messagingService?.status)}</span>
+                      <span>Messaging profile: {formatMessagingStatusLabel(messagingStatus.messagingProfile?.status)}</span>
                       <span>Sender: {formatAdminValue(messagingStatus.sender?.number)}</span>
                       <span>Sender found: {formatAdminValue(messagingStatus.sender?.foundInAccount)}</span>
                       <span>SMS capable: {formatAdminValue(messagingStatus.sender?.smsCapable)}</span>
                       <span>Toll-free: {formatAdminValue(messagingStatus.sender?.isTollFree)}</span>
-                      <span>
-                        TFV: {formatMessagingStatusLabel(messagingStatus.sender?.tollFreeVerification?.status)}
-                      </span>
+                      <span>Profile ID: {formatAdminValue(messagingStatus.messagingProfile?.id)}</span>
+                      <span>Webhook v2: {formatAdminValue(messagingStatus.messagingProfile?.webhookApiVersion === '2')}</span>
+                      <span>Signature key: {formatAdminValue(messagingStatus.webhooks?.publicKeyConfigured)}</span>
                     </div>
                     {messagingStatus.blockingIssue ? (
                       <p className="signup-status signup-status-error">{messagingStatus.blockingIssue}</p>
+                    ) : messagingStatus.webhookWarning ? (
+                      <p className="signup-status signup-status-error">{messagingStatus.webhookWarning}</p>
                     ) : (
-                      <p className="signup-status signup-status-success">Twilio sender configuration looks ready.</p>
+                      <p className="signup-status signup-status-success">Telnyx sender configuration looks ready.</p>
                     )}
                   </>
                 ) : null}

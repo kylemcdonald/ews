@@ -21,21 +21,6 @@ export async function readJsonRequest(request) {
   return request.json();
 }
 
-export async function readFormRequest(request) {
-  const contentType = request.headers.get("content-type") || "";
-  if (!contentType.includes("application/x-www-form-urlencoded") && !contentType.includes("multipart/form-data")) {
-    throw new HttpError(415, "Expected form data.");
-  }
-
-  const formData = await request.formData();
-  const values = {};
-  for (const [key, value] of formData.entries()) {
-    values[key] = typeof value === "string" ? value : value.name;
-  }
-
-  return values;
-}
-
 export function getRequestIp(request) {
   return (
     request.headers.get("cf-connecting-ip") ||

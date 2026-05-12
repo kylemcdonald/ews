@@ -1,5 +1,5 @@
-import { basicAuth } from "./encoding.js";
 import { HttpError } from "./http.js";
+import { getTelnyxWebhookFailoverUrl, getTelnyxWebhookUrl, telnyxJson } from "./telnyx.js";
 
 const NANP_TOLL_FREE_AREA_CODES = new Set(["800", "833", "844", "855", "866", "877", "888"]);
 
@@ -12,43 +12,13 @@ function maskPhone(value) {
   return text.replace(/\d(?=\d{2})/g, "x");
 }
 
-function maskSid(value) {
+function maskId(value) {
   const text = String(value || "").trim();
   if (!text) {
     return null;
   }
 
-  return text.length > 8 ? `${text.slice(0, 4)}...${text.slice(-4)}` : text;
-}
-
-function getTwilioAuth(env) {
-  const accountSid = String(env.TWILIO_ACCOUNT_SID || "").trim();
-  const authToken = String(env.TWILIO_AUTH_TOKEN || "").trim();
-  const apiKeySid = String(env.TWILIO_API_KEY_SID || "").trim();
-  const apiKeySecret = String(env.TWILIO_API_KEY_SECRET || "").trim();
-  const hasApiKeyAuth = apiKeySid.startsWith("SK") && Boolean(apiKeySecret);
-  if (!accountSid || (!authToken && !hasApiKeyAuth)) {
-    throw new HttpError(500, "Twilio credentials are not configured.");
-  }
-
-  return {
-    accountSid,
-    authorization: basicAuth(hasApiKeyAuth ? apiKeySid : accountSid, hasApiKeyAuth ? apiKeySecret : authToken),
-  };
-}
-
-async function twilioJson(url, auth) {
-  const response = await fetch(url, {
-    headers: {
-      authorization: auth.authorization,
-    },
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new HttpError(response.status, payload.message || `Twilio request failed with ${response.status}`);
-  }
-
-  return payload;
+  return text.length > 12 ? `${text.slice(0, 8)}...${text.slice(-4)}` : text;
 }
 
 function getNanpAreaCode(phone) {
@@ -64,113 +34,171 @@ function isTollFreePhone(phone) {
   return NANP_TOLL_FREE_AREA_CODES.has(getNanpAreaCode(phone));
 }
 
-function summarizeVerification(verification) {
-  if (!verification) {
-    return null;
-  }
-
-  return {
-    sid: verification.sid || null,
-    status: verification.status || null,
-    createdAt: verification.date_created || verification.created_at || null,
-    updatedAt: verification.date_updated || verification.updated_at || null,
-    editAllowed: verification.edit_allowed ?? null,
-    editExpiration: verification.edit_expiration || null,
-    rejectionReasons: verification.rejection_reasons || null,
-  };
+function getConfiguredFromNumber(env) {
+  return String(env.TELNYX_FROM_PHONE || env.TELNYX_NUMBER || "").trim();
 }
 
-function buildBlockingIssue({ sender, sendMethod }) {
-  if (!sender.configured) {
-    return "No TWILIO_FROM_PHONE sender is configured.";
+function getConfiguredProfileId(env) {
+  return String(env.TELNYX_MESSAGING_PROFILE_ID || "").trim();
+}
+
+function isSmsCapable(features = {}) {
+  return Boolean(features.domestic_two_way || features.international_inbound || features.international_outbound);
+}
+
+async function getConfiguredSender(env, fromPhone) {
+  const sender = {
+    configured: Boolean(fromPhone),
+    number: maskPhone(fromPhone),
+    foundInAccount: false,
+    messagingProfileId: null,
+    countryCode: null,
+    type: null,
+    smsCapable: false,
+    mmsCapable: false,
+    domesticTwoWaySms: false,
+    internationalOutboundSms: false,
+    isTollFree: isTollFreePhone(fromPhone),
+  };
+
+  if (!fromPhone) {
+    return sender;
   }
 
-  if (sendMethod === "messaging_service") {
-    return null;
+  try {
+    const payload = await telnyxJson(env, `/messaging_phone_numbers/${encodeURIComponent(fromPhone)}`);
+    const number = payload.data || null;
+    const smsFeatures = number?.features?.sms || {};
+    const mmsFeatures = number?.features?.mms || {};
+    return {
+      ...sender,
+      foundInAccount: Boolean(number),
+      messagingProfileId: number?.messaging_profile_id || null,
+      countryCode: number?.country_code || null,
+      type: number?.type || null,
+      smsCapable: isSmsCapable(smsFeatures),
+      mmsCapable: isSmsCapable(mmsFeatures),
+      domesticTwoWaySms: Boolean(smsFeatures.domestic_two_way),
+      internationalOutboundSms: Boolean(smsFeatures.international_outbound),
+    };
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 404) {
+      return sender;
+    }
+
+    throw error;
+  }
+}
+
+async function getMessagingProfile(env, profileId) {
+  const profile = {
+    configured: Boolean(profileId),
+    id: maskId(profileId),
+    foundInAccount: false,
+    status: profileId ? "not_found" : "not_configured",
+    name: null,
+    enabled: null,
+    webhookUrl: null,
+    webhookFailoverUrl: null,
+    webhookApiVersion: null,
+    whitelistedDestinations: [],
+  };
+
+  if (!profileId) {
+    return profile;
   }
 
-  if (!sender.foundInAccount) {
-    return "Configured TWILIO_FROM_PHONE was not found in this Twilio account.";
+  try {
+    const payload = await telnyxJson(env, `/messaging_profiles/${encodeURIComponent(profileId)}`);
+    const data = payload.data || null;
+    return {
+      ...profile,
+      foundInAccount: Boolean(data),
+      status: data?.enabled === false ? "disabled" : "configured",
+      name: data?.name || null,
+      enabled: data?.enabled ?? null,
+      webhookUrl: data?.webhook_url || null,
+      webhookFailoverUrl: data?.webhook_failover_url || null,
+      webhookApiVersion: data?.webhook_api_version || null,
+      whitelistedDestinations: Array.isArray(data?.whitelisted_destinations) ? data.whitelisted_destinations : [],
+    };
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 404) {
+      return profile;
+    }
+
+    throw error;
+  }
+}
+
+function buildBlockingIssue({ sender, messagingProfile, sendMethod }) {
+  if (sendMethod === "unconfigured") {
+    return "No TELNYX_NUMBER sender or TELNYX_MESSAGING_PROFILE_ID is configured.";
   }
 
-  if (!sender.smsCapable) {
-    return "Configured TWILIO_FROM_PHONE is not SMS capable.";
+  if (sender.configured && !sender.foundInAccount) {
+    return "Configured TELNYX_NUMBER was not found in this Telnyx account.";
   }
 
-  if (sender.isTollFree && sender.tollFreeVerification?.status !== "TWILIO_APPROVED") {
-    const status = sender.tollFreeVerification?.status || "not submitted";
-    return `Toll-free sender verification is ${status}. US/Canada SMS is blocked until Twilio approves it.`;
+  if (sender.configured && !sender.smsCapable) {
+    return "Configured TELNYX_NUMBER is not SMS capable.";
+  }
+
+  if (sender.configured && !sender.messagingProfileId) {
+    return "Configured TELNYX_NUMBER is not assigned to a messaging profile.";
+  }
+
+  if (messagingProfile.configured && !messagingProfile.foundInAccount) {
+    return "Configured Telnyx messaging profile was not found in this account.";
+  }
+
+  if (messagingProfile.enabled === false) {
+    return "Configured Telnyx messaging profile is disabled.";
+  }
+
+  return null;
+}
+
+function buildWebhookWarning(env, messagingProfile) {
+  if (!String(env.TELNYX_PUBLIC_KEY || "").trim()) {
+    return "TELNYX_PUBLIC_KEY is not configured; Telnyx webhooks will be acknowledged but ignored until it is added.";
+  }
+
+  if (messagingProfile.configured && messagingProfile.webhookApiVersion && messagingProfile.webhookApiVersion !== "2") {
+    return "Telnyx messaging profile webhooks are not set to API version 2.";
   }
 
   return null;
 }
 
 export async function getMessagingStatus(env) {
-  const auth = getTwilioAuth(env);
-  const fromPhone = String(env.TWILIO_FROM_PHONE || "").trim();
-  const messagingServiceSid = String(env.TWILIO_MESSAGING_SERVICE_SID || "").trim();
-  const hasMessagingService = messagingServiceSid.startsWith("MG");
-  const sendMethod = hasMessagingService ? "messaging_service" : fromPhone ? "from_phone" : "unconfigured";
-
-  let messagingService = {
-    configured: Boolean(messagingServiceSid),
-    sid: maskSid(messagingServiceSid),
-    validSid: hasMessagingService,
-    status: hasMessagingService ? "configured" : messagingServiceSid ? "invalid_sid" : "not_configured",
-  };
-  if (hasMessagingService) {
-    const servicePayload = await twilioJson(`https://messaging.twilio.com/v1/Services/${messagingServiceSid}`, auth);
-    messagingService = {
-      ...messagingService,
-      friendlyName: servicePayload.friendly_name || null,
-      inboundRequestUrl: servicePayload.inbound_request_url || null,
-      statusCallback: servicePayload.status_callback || null,
-      useInboundWebhookOnNumber: servicePayload.use_inbound_webhook_on_number ?? null,
-    };
+  const apiKey = String(env.TELNYX_API_KEY || "").trim();
+  if (!apiKey) {
+    throw new HttpError(500, "Telnyx API key is not configured.");
   }
 
-  let sender = {
-    configured: Boolean(fromPhone),
-    number: maskPhone(fromPhone),
-    foundInAccount: false,
-    sid: null,
-    smsCapable: false,
-    mmsCapable: false,
-    isTollFree: isTollFreePhone(fromPhone),
-    tollFreeVerification: null,
-  };
-
-  if (fromPhone) {
-    const numberUrl = new URL(`https://api.twilio.com/2010-04-01/Accounts/${auth.accountSid}/IncomingPhoneNumbers.json`);
-    numberUrl.searchParams.set("PhoneNumber", fromPhone);
-    const numberPayload = await twilioJson(numberUrl, auth);
-    const incomingNumber = numberPayload.incoming_phone_numbers?.[0] || null;
-
-    sender = {
-      ...sender,
-      foundInAccount: Boolean(incomingNumber),
-      sid: incomingNumber?.sid || null,
-      smsCapable: Boolean(incomingNumber?.capabilities?.sms),
-      mmsCapable: Boolean(incomingNumber?.capabilities?.mms),
-    };
-
-    if (incomingNumber?.sid && sender.isTollFree) {
-      const verificationUrl = new URL("https://messaging.twilio.com/v1/Tollfree/Verifications");
-      verificationUrl.searchParams.set("TollfreePhoneNumberSid", incomingNumber.sid);
-      const verificationPayload = await twilioJson(verificationUrl, auth);
-      sender.tollFreeVerification = summarizeVerification(verificationPayload.verifications?.[0] || null);
-    }
-  }
-
-  const blockingIssue = buildBlockingIssue({ sender, sendMethod });
+  const fromPhone = getConfiguredFromNumber(env);
+  const configuredProfileId = getConfiguredProfileId(env);
+  const sendMethod = fromPhone ? "from_phone" : configuredProfileId ? "messaging_profile" : "unconfigured";
+  const sender = await getConfiguredSender(env, fromPhone);
+  const profileId = configuredProfileId || sender.messagingProfileId || "";
+  const messagingProfile = await getMessagingProfile(env, profileId);
+  const blockingIssue = buildBlockingIssue({ sender, messagingProfile, sendMethod });
 
   return {
     ok: true,
+    provider: "telnyx",
     checkedAt: new Date().toISOString(),
     sendMethod,
     readyForSms: !blockingIssue,
     blockingIssue,
-    messagingService,
+    webhookWarning: buildWebhookWarning(env, messagingProfile),
+    webhooks: {
+      url: getTelnyxWebhookUrl(env),
+      failoverUrl: getTelnyxWebhookFailoverUrl(env),
+      publicKeyConfigured: Boolean(String(env.TELNYX_PUBLIC_KEY || "").trim()),
+    },
+    messagingProfile,
     sender,
   };
 }

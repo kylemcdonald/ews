@@ -9,8 +9,8 @@ import {
 } from "./db.js";
 import { contactHash } from "./crypto.js";
 import { createCustomerPortalLink } from "./customer-portal.js";
-import { basicAuth } from "./encoding.js";
 import { HttpError } from "./http.js";
+import { sendTelnyxMessage } from "./telnyx.js";
 
 const LEVEL5_COOLDOWN_META_KEY = "level5_notification_last_sent_at";
 const DEFAULT_ALERT_URL = "https://ews.kylemcdonald.net/";
@@ -75,29 +75,9 @@ function getAlertUrl(env) {
   return String(env.EWS_PUBLIC_URL || DEFAULT_ALERT_URL).trim() || DEFAULT_ALERT_URL;
 }
 
-function getPublicBaseUrl(env) {
-  return String(env.APP_BASE_URL || env.EWS_PUBLIC_URL || DEFAULT_ALERT_URL)
-    .trim()
-    .replace(/\/+$/, "");
-}
-
 async function appendCustomerPortalLink(env, subscriber, messageText) {
   const portalUrl = await createCustomerPortalLink(env, subscriber);
   return `${messageText}\n\nManage or cancel your subscription: ${portalUrl}`;
-}
-
-function getSmsStatusCallbackUrl(env) {
-  const configuredUrl = String(env.TWILIO_STATUS_CALLBACK_URL || "").trim();
-  if (configuredUrl) {
-    return configuredUrl;
-  }
-
-  const publicBaseUrl = getPublicBaseUrl(env);
-  if (!publicBaseUrl.startsWith("https://")) {
-    return null;
-  }
-
-  return `${publicBaseUrl}/api/twilio/status-callback`;
 }
 
 async function sendEmail(env, { to, subject, text }) {
@@ -144,49 +124,7 @@ async function sendEmail(env, { to, subject, text }) {
 }
 
 async function sendSms(env, { to, text }) {
-  const accountSid = String(env.TWILIO_ACCOUNT_SID || "").trim();
-  const authToken = String(env.TWILIO_AUTH_TOKEN || "").trim();
-  const fromPhone = String(env.TWILIO_FROM_PHONE || "").trim();
-  const messagingServiceSid = String(env.TWILIO_MESSAGING_SERVICE_SID || "").trim();
-  const apiKeySid = String(env.TWILIO_API_KEY_SID || env.TWILIO_MESSAGING_SERVICE_SID || "").trim();
-  const apiKeySecret = String(env.TWILIO_API_KEY_SECRET || env.TWILIO_MESSAGING_SERVICE_SECRET || "").trim();
-  const hasApiKeyAuth = apiKeySid.startsWith("SK") && Boolean(apiKeySecret);
-  const hasMessagingService = messagingServiceSid.startsWith("MG");
-  if (!accountSid || (!authToken && !hasApiKeyAuth) || (!fromPhone && !hasMessagingService)) {
-    throw new HttpError(500, "Twilio is not configured.");
-  }
-
-  const body = new URLSearchParams();
-  body.set("To", to);
-  body.set("Body", text);
-  if (hasMessagingService) {
-    body.set("MessagingServiceSid", messagingServiceSid);
-  } else {
-    body.set("From", fromPhone);
-  }
-  const statusCallbackUrl = getSmsStatusCallbackUrl(env);
-  if (statusCallbackUrl) {
-    body.set("StatusCallback", statusCallbackUrl);
-  }
-
-  const authUsername = hasApiKeyAuth ? apiKeySid : accountSid;
-  const authPassword = authUsername === apiKeySid ? apiKeySecret : authToken;
-  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
-    method: "POST",
-    headers: {
-      authorization: basicAuth(authUsername, authPassword),
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body,
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.message || `Twilio request failed with ${response.status}`);
-  }
-
-  return {
-    id: payload.sid || null,
-  };
+  return sendTelnyxMessage(env, { to, text });
 }
 
 async function sendDelivery(env, { alertId, subscriberId, channel, destination, text, subject = null }) {
