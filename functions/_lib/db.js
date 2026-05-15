@@ -771,7 +771,10 @@ export async function updateSubscriberContactSettings(env, subscriberId, payload
   }
 
   const previous = await hydrateSubscriberContacts(env, subscriber);
-  const accountEmail = normalizeEmail(payload.accountEmail || payload.email || previous.accountEmail);
+  const accountEmail =
+    subscriber.source === "manual"
+      ? normalizeEmail(payload.accountEmail || payload.email || previous.accountEmail)
+      : previous.accountEmail;
   const wantsEmail = Boolean(payload.wantsEmail);
   const email = wantsEmail ? normalizeEmail(payload.email || payload.accountEmail || accountEmail) : null;
   const phone = normalizePhone(payload.phone);
@@ -791,14 +794,24 @@ export async function updateSubscriberContactSettings(env, subscriberId, payload
 
   const timestamp = nowIso();
   const phoneCountry = phone ? getPhoneCountry(phone) : null;
-  const [accountEmailHash, accountEmailCipher, emailHash, emailCipher, phoneHash, phoneCipher] = await Promise.all([
-    contactHash(env, "email", accountEmail),
-    encryptString(env, accountEmail),
-    contactHash(env, "email", email),
-    encryptString(env, email),
-    contactHash(env, "phone", phone),
-    encryptString(env, phone),
-  ]);
+  const [accountEmailHash, accountEmailCipher, emailHash, emailCipher, phoneHash, phoneCipher] =
+    subscriber.source === "manual"
+      ? await Promise.all([
+          contactHash(env, "email", accountEmail),
+          encryptString(env, accountEmail),
+          contactHash(env, "email", email),
+          encryptString(env, email),
+          contactHash(env, "phone", phone),
+          encryptString(env, phone),
+        ])
+      : await Promise.all([
+          Promise.resolve(subscriber.account_email_hash),
+          Promise.resolve(subscriber.account_email_cipher),
+          contactHash(env, "email", email),
+          encryptString(env, email),
+          contactHash(env, "phone", phone),
+          encryptString(env, phone),
+        ]);
 
   await getDb(env)
     .prepare(
@@ -826,7 +839,7 @@ export async function updateSubscriberContactSettings(env, subscriberId, payload
     .bind(
       accountEmailCipher,
       accountEmailHash,
-      subscriber.source === "manual" ? "manual" : "signup",
+      subscriber.source === "manual" ? "manual" : subscriber.account_email_source,
       emailCipher,
       emailHash,
       phoneCipher,

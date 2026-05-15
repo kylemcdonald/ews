@@ -4157,7 +4157,7 @@ function ManageSubscriptionPage() {
     }
 
     postManagementAction('save', {
-      accountEmail: accountEmail.trim(),
+      accountEmail: subscriber?.source === 'manual' ? accountEmail.trim() : undefined,
       email: alertEmail.trim(),
       phone: normalizedPhone,
       wantsEmail,
@@ -4207,16 +4207,18 @@ function ManageSubscriptionPage() {
             {subscriber ? (
               <>
                 <form className="signup-form" onSubmit={handleSave}>
-                  <label className="signup-field">
-                    <span>Account email</span>
-                    <input
-                      type="email"
-                      value={accountEmail}
-                      autoComplete="email"
-                      disabled={subscriber.status === 'canceled'}
-                      onChange={(event) => setAccountEmail(event.target.value)}
-                    />
-                  </label>
+                  {subscriber.source === 'manual' ? (
+                    <label className="signup-field">
+                      <span>Account email</span>
+                      <input
+                        type="email"
+                        value={accountEmail}
+                        autoComplete="email"
+                        disabled={subscriber.status === 'canceled'}
+                        onChange={(event) => setAccountEmail(event.target.value)}
+                      />
+                    </label>
+                  ) : null}
 
                   <label className="signup-field">
                     <span>Alert email</span>
