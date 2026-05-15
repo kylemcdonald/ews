@@ -618,9 +618,6 @@ export async function createManualSubscriber(env, payload = {}, requestContext =
   if (!email && !phone) {
     throw new HttpError(400, "Enter an alert email address, a phone number, or both.");
   }
-  if (phone && !isSupportedSmsPhone(phone)) {
-    throw new HttpError(400, "Manual SMS subscribers must use a US or Canada phone number.");
-  }
   if (wantsSms && !payload.smsConsent) {
     throw new HttpError(400, "Confirm SMS consent before enabling SMS for a manual subscriber.");
   }

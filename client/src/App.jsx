@@ -4130,7 +4130,10 @@ function ManageSubscriptionPage() {
         throw new Error(payload.error || 'Could not update notification settings.')
       }
       applySubscriber(payload.subscriber)
-      setStatus({ tone: 'success', message: 'Settings updated.' })
+      setStatus({
+        tone: 'success',
+        message: action === 'delete_account' ? 'Account deleted' : 'Settings updated.',
+      })
     } catch (error) {
       setStatus({ tone: 'error', message: error.message })
     } finally {
@@ -4512,11 +4515,6 @@ function AdminTestAlertPage() {
         normalizedPhone = normalizePhoneInput(trimmedPhone)
       } catch (error) {
         setManualStatus({ tone: 'error', message: error.message })
-        return
-      }
-
-      if (!isSupportedSmsCountry(normalizedPhone)) {
-        setManualStatus({ tone: 'error', message: 'Manual SMS subscribers must use a US or Canada phone number.' })
         return
       }
     }
