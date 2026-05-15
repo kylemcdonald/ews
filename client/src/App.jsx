@@ -5041,6 +5041,7 @@ function AdminTestAlertPage() {
                           <th scope="col">Stripe</th>
                           <th scope="col">Dates</th>
                           <th scope="col">Deliveries</th>
+                          <th scope="col">Actions</th>
                           <th scope="col">All Fields</th>
                         </tr>
                       </thead>
@@ -5074,6 +5075,15 @@ function AdminTestAlertPage() {
                               <span>Email: {formatAdminValue(subscriber.emailDeliveryCount)}</span>
                               <span>SMS: {formatAdminValue(subscriber.smsDeliveryCount)}</span>
                               <span>Errors: {formatAdminValue(subscriber.deliveryErrorCount)}</span>
+                            </td>
+                            <td>
+                              {subscriber.managementUrl ? (
+                                <a className="subscriber-action-link" href={subscriber.managementUrl}>
+                                  Edit
+                                </a>
+                              ) : (
+                                <span>{formatAdminValue(null)}</span>
+                              )}
                             </td>
                             <td>
                               <details className="subscriber-details">

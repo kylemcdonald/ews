@@ -1,5 +1,6 @@
 import { contactHash, decryptString, encryptString, metadataHash } from "./crypto.js";
 import { getPhoneCountry, isSupportedSmsPhone, normalizeEmail, normalizePhone } from "./contacts.js";
+import { createAccountManagementLink } from "./customer-portal.js";
 import { HttpError } from "./http.js";
 
 export const SUBSCRIBER_STATUS = {
@@ -1239,12 +1240,13 @@ function mapSubscriberDailyStats(row) {
   };
 }
 
-async function mapAdminSubscriberRow(env, row) {
+async function mapAdminSubscriberRow(env, row, options = {}) {
   const [email, accountEmail, phone] = await Promise.all([
     decryptString(env, row.email_cipher),
     decryptString(env, row.account_email_cipher),
     decryptString(env, row.phone_cipher),
   ]);
+  const managementUrl = await createAccountManagementLink(env, row, { baseUrl: options.managementBaseUrl });
 
   return {
     id: row.id,
@@ -1292,6 +1294,7 @@ async function mapAdminSubscriberRow(env, row) {
     smsDeliveryCount: Number(row.sms_delivery_count || 0),
     deliveryErrorCount: Number(row.delivery_error_count || 0),
     lastDeliveryAt: row.last_delivery_at,
+    managementUrl,
   };
 }
 
@@ -1381,7 +1384,7 @@ export async function getAdminSubscriberRecords(env, options = {}) {
     queryRows(env, subscribersQuery, [pageSize, offset]),
   ]);
   const summary = mapSubscriberSummary(summaryRows[0]);
-  const subscribers = await Promise.all(subscriberRows.map((row) => mapAdminSubscriberRow(env, row)));
+  const subscribers = await Promise.all(subscriberRows.map((row) => mapAdminSubscriberRow(env, row, options)));
 
   return {
     subscribers,

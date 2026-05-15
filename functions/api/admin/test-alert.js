@@ -3,6 +3,12 @@ import { getAdminSubscriberRecords, getRecentAlertDeliveries } from "../../_lib/
 import { handleError, HttpError, jsonResponse, readJsonRequest } from "../../_lib/http.js";
 import { sendAdminSingleTest, sendAdminTestToAll } from "../../_lib/notifications.js";
 
+function getNotificationBaseUrl(env) {
+  return String(env.EWS_NOTIFICATION_URL || env.APP_BASE_URL || "https://aews.cc/")
+    .trim()
+    .replace(/\/+$/, "");
+}
+
 function buildDefaultTestSnapshot() {
   return {
     signals: {
@@ -49,6 +55,7 @@ export async function onRequestGet({ request, env }) {
       const subscriberRecords = await getAdminSubscriberRecords(env, {
         page: url.searchParams.get("page"),
         pageSize: url.searchParams.get("pageSize"),
+        managementBaseUrl: getNotificationBaseUrl(env),
       });
       return jsonResponse(
         {

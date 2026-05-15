@@ -1246,7 +1246,7 @@ html.emergency-color-scheme .map-control-button:hover:not(:disabled) {
 
 .subscriber-table {
   width: 100%;
-  min-width: 1080px;
+  min-width: 1160px;
   border-collapse: collapse;
   table-layout: fixed;
   font-size: 12px;
@@ -1271,6 +1271,23 @@ html.emergency-color-scheme .map-control-button:hover:not(:disabled) {
 .subscriber-table td > strong,
 .subscriber-table td > span {
   display: block;
+}
+
+.subscriber-action-link {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 10px;
+  border: 1px solid #111111;
+  color: #111111;
+  background: #ffffff;
+  text-decoration: none;
+}
+
+.subscriber-action-link:hover,
+.subscriber-action-link:focus-visible {
+  background: #e5e5e5;
 }
 
 .subscriber-details summary {
