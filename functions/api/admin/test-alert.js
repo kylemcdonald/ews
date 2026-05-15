@@ -55,6 +55,7 @@ export async function onRequestGet({ request, env }) {
       const subscriberRecords = await getAdminSubscriberRecords(env, {
         page: url.searchParams.get("page"),
         pageSize: url.searchParams.get("pageSize"),
+        emailSearch: url.searchParams.get("emailSearch") || url.searchParams.get("search"),
         managementBaseUrl: getNotificationBaseUrl(env),
       });
       return jsonResponse(

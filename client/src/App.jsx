@@ -4362,6 +4362,8 @@ function AdminTestAlertPage() {
   const [subscriberStatus, setSubscriberStatus] = useState(null)
   const [subscriberPage, setSubscriberPage] = useState(1)
   const [subscriberNotifyId, setSubscriberNotifyId] = useState('')
+  const [subscriberSearchInput, setSubscriberSearchInput] = useState('')
+  const [subscriberEmailSearch, setSubscriberEmailSearch] = useState('')
   const [manualAccountEmail, setManualAccountEmail] = useState('')
   const [manualAlertEmail, setManualAlertEmail] = useState('')
   const [manualPhone, setManualPhone] = useState('')
@@ -4384,13 +4386,17 @@ function AdminTestAlertPage() {
 
   useInitialLoaderDismissed()
 
-  const loadSubscriberRecords = useCallback(async (page = 1) => {
+  const loadSubscriberRecords = useCallback(async (page = 1, emailSearch = subscriberEmailSearch) => {
     const targetPage = Math.max(1, Math.trunc(Number(page || 1)))
+    const normalizedEmailSearch = String(emailSearch || '').trim()
     const params = new URLSearchParams({
       view: 'subscribers',
       page: String(targetPage),
       pageSize: String(SUBSCRIBERS_PER_PAGE),
     })
+    if (normalizedEmailSearch) {
+      params.set('emailSearch', normalizedEmailSearch)
+    }
     setSubscriberLoading(true)
     setSubscriberStatus(null)
     try {
@@ -4415,7 +4421,7 @@ function AdminTestAlertPage() {
     } finally {
       setSubscriberLoading(false)
     }
-  }, [])
+  }, [subscriberEmailSearch])
 
   useEffect(() => {
     const previousTitle = document.title
@@ -4685,6 +4691,25 @@ function AdminTestAlertPage() {
       setSubscriberStatus({ tone: 'error', message: error.message })
     } finally {
       setSubscriberNotifyId('')
+    }
+  }
+
+  function handleSubscriberSearchSubmit(event) {
+    event.preventDefault()
+    const nextSearch = subscriberSearchInput.trim()
+    setSubscriberEmailSearch(nextSearch)
+    setSubscriberPage(1)
+    if (nextSearch === subscriberEmailSearch && normalizedSubscriberPage === 1) {
+      loadSubscriberRecords(1, nextSearch)
+    }
+  }
+
+  function clearSubscriberSearch() {
+    setSubscriberSearchInput('')
+    setSubscriberEmailSearch('')
+    setSubscriberPage(1)
+    if (!subscriberEmailSearch && normalizedSubscriberPage === 1) {
+      loadSubscriberRecords(1, '')
     }
   }
 
@@ -5042,6 +5067,33 @@ function AdminTestAlertPage() {
               {subscriberStatus ? (
                 <p className={`signup-status signup-status-${subscriberStatus.tone}`} role="status">
                   {subscriberStatus.message}
+                </p>
+              ) : null}
+
+              <form className="subscriber-search-form" onSubmit={handleSubscriberSearchSubmit}>
+                <label className="signup-field subscriber-search-field">
+                  <span>Email search</span>
+                  <input
+                    type="search"
+                    value={subscriberSearchInput}
+                    placeholder="exact or partial email"
+                    autoComplete="off"
+                    onChange={(event) => setSubscriberSearchInput(event.target.value)}
+                  />
+                </label>
+                <button className="signup-submit" type="submit" disabled={subscriberLoading}>
+                  Search
+                </button>
+                {subscriberEmailSearch ? (
+                  <button className="subscriber-search-clear" type="button" disabled={subscriberLoading} onClick={clearSubscriberSearch}>
+                    Clear
+                  </button>
+                ) : null}
+              </form>
+
+              {subscriberEmailSearch ? (
+                <p className="subscriber-search-note">
+                  Email search: <strong>{subscriberEmailSearch}</strong>
                 </p>
               ) : null}
 

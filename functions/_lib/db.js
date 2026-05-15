@@ -1240,6 +1240,138 @@ function mapSubscriberDailyStats(row) {
   };
 }
 
+function normalizeAdminEmailSearch(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function subscriberStatusRank(status) {
+  if (status === SUBSCRIBER_STATUS.ACTIVE) {
+    return 0;
+  }
+  if (status === SUBSCRIBER_STATUS.PENDING) {
+    return 1;
+  }
+  if (status === SUBSCRIBER_STATUS.PAST_DUE) {
+    return 2;
+  }
+
+  return 3;
+}
+
+function compareSubscriberRows(left, right) {
+  const statusDiff = subscriberStatusRank(left.status) - subscriberStatusRank(right.status);
+  if (statusDiff !== 0) {
+    return statusDiff;
+  }
+
+  const updatedDiff = String(right.updated_at || "").localeCompare(String(left.updated_at || ""));
+  if (updatedDiff !== 0) {
+    return updatedDiff;
+  }
+
+  return String(left.id || "").localeCompare(String(right.id || ""));
+}
+
+function mapSubscriberSummaryFromRows(rows) {
+  const summary = {
+    total: rows.length,
+    active: 0,
+    pending_checkout: 0,
+    past_due: 0,
+    canceled: 0,
+    wantsEmail: 0,
+    wantsSms: 0,
+    wantsBoth: 0,
+  };
+
+  for (const row of rows) {
+    if (row.status === SUBSCRIBER_STATUS.ACTIVE) {
+      summary.active += 1;
+    } else if (row.status === SUBSCRIBER_STATUS.PENDING) {
+      summary.pending_checkout += 1;
+    } else if (row.status === SUBSCRIBER_STATUS.PAST_DUE) {
+      summary.past_due += 1;
+    } else if (row.status === SUBSCRIBER_STATUS.CANCELED) {
+      summary.canceled += 1;
+    }
+    if (Number(row.wants_email || 0) === 1) {
+      summary.wantsEmail += 1;
+    }
+    if (Number(row.wants_sms || 0) === 1) {
+      summary.wantsSms += 1;
+    }
+    if (Number(row.wants_email || 0) === 1 && Number(row.wants_sms || 0) === 1) {
+      summary.wantsBoth += 1;
+    }
+  }
+
+  return summary;
+}
+
+function getSubscriberStatsDate(row) {
+  const value =
+    row.status === SUBSCRIBER_STATUS.ACTIVE
+      ? row.checkout_completed_at || row.checkout_created_at || row.created_at
+      : row.status === SUBSCRIBER_STATUS.CANCELED
+        ? row.canceled_at || row.updated_at || row.created_at
+        : row.checkout_created_at || row.created_at || row.updated_at;
+  return String(value || "").slice(0, 10);
+}
+
+function mapSubscriberDailyStatsFromRows(rows) {
+  const byDay = new Map();
+  for (const row of rows) {
+    const day = getSubscriberStatsDate(row);
+    if (!day) {
+      continue;
+    }
+    const stats =
+      byDay.get(day) ||
+      {
+        day,
+        active: 0,
+        pending: 0,
+        canceled: 0,
+        email: 0,
+        sms: 0,
+        both: 0,
+        grossVolume: 0,
+      };
+
+    if (row.status === SUBSCRIBER_STATUS.ACTIVE) {
+      stats.active += 1;
+    } else if (row.status === SUBSCRIBER_STATUS.PENDING) {
+      stats.pending += 1;
+    } else if (row.status === SUBSCRIBER_STATUS.CANCELED) {
+      stats.canceled += 1;
+    }
+    if (Number(row.wants_email || 0) === 1) {
+      stats.email += 1;
+    }
+    if (Number(row.wants_sms || 0) === 1) {
+      stats.sms += 1;
+    }
+    if (Number(row.wants_email || 0) === 1 && Number(row.wants_sms || 0) === 1) {
+      stats.both += 1;
+    }
+    stats.grossVolume = stats.active * 5;
+    byDay.set(day, stats);
+  }
+
+  return Array.from(byDay.values()).sort((left, right) => left.day.localeCompare(right.day));
+}
+
+function mergeDeliveryStats(row, stats = {}) {
+  return {
+    ...row,
+    delivery_count: Number(stats.delivery_count || 0),
+    email_delivery_count: Number(stats.email_delivery_count || 0),
+    sms_delivery_count: Number(stats.sms_delivery_count || 0),
+    delivery_error_count: Number(stats.delivery_error_count || 0),
+    last_delivery_at: stats.last_delivery_at || null,
+  };
+}
+
 async function mapAdminSubscriberRow(env, row, options = {}) {
   const [email, accountEmail, phone] = await Promise.all([
     decryptString(env, row.email_cipher),
@@ -1298,10 +1430,96 @@ async function mapAdminSubscriberRow(env, row, options = {}) {
   };
 }
 
+async function getAdminSubscriberSearchRecords(env, { page, pageSize, emailSearch, managementBaseUrl }) {
+  const subscribersQuery = `
+        SELECT *
+        FROM notification_signups
+        ORDER BY
+          CASE status
+            WHEN 'active' THEN 0
+            WHEN 'pending_checkout' THEN 1
+            WHEN 'past_due' THEN 2
+            ELSE 3
+          END,
+          updated_at DESC,
+          id ASC
+      `;
+  const rows = await queryRows(env, subscribersQuery);
+  const matchedRows = [];
+
+  for (const row of rows) {
+    const [email, accountEmail] = await Promise.all([
+      decryptString(env, row.email_cipher),
+      decryptString(env, row.account_email_cipher),
+    ]);
+    if (
+      String(email || "").toLowerCase().includes(emailSearch) ||
+      String(accountEmail || "").toLowerCase().includes(emailSearch)
+    ) {
+      matchedRows.push(row);
+    }
+  }
+
+  matchedRows.sort(compareSubscriberRows);
+  const offset = (page - 1) * pageSize;
+  const pageRows = matchedRows.slice(offset, offset + pageSize);
+  const deliveryStatsBySubscriber = new Map();
+
+  if (pageRows.length) {
+    const placeholders = pageRows.map(() => "?").join(", ");
+    const deliveryStatsRows = await queryRows(
+      env,
+      `
+        SELECT
+          subscriber_id,
+          COUNT(id) AS delivery_count,
+          SUM(CASE WHEN channel = 'email' THEN 1 ELSE 0 END) AS email_delivery_count,
+          SUM(CASE WHEN channel = 'sms' THEN 1 ELSE 0 END) AS sms_delivery_count,
+          SUM(CASE WHEN status IN ('failed', 'undelivered') THEN 1 ELSE 0 END) AS delivery_error_count,
+          MAX(COALESCE(updated_at, created_at)) AS last_delivery_at
+        FROM notification_deliveries
+        WHERE subscriber_id IN (${placeholders})
+        GROUP BY subscriber_id
+      `,
+      pageRows.map((row) => row.id),
+    );
+    for (const row of deliveryStatsRows) {
+      deliveryStatsBySubscriber.set(row.subscriber_id, row);
+    }
+  }
+
+  const subscribers = await Promise.all(
+    pageRows.map((row) =>
+      mapAdminSubscriberRow(env, mergeDeliveryStats(row, deliveryStatsBySubscriber.get(row.id)), { managementBaseUrl }),
+    ),
+  );
+
+  return {
+    subscribers,
+    summary: mapSubscriberSummaryFromRows(matchedRows),
+    dailyStats: mapSubscriberDailyStatsFromRows(matchedRows),
+    page,
+    pageSize,
+    total: matchedRows.length,
+    emailSearch,
+  };
+}
+
 export async function getAdminSubscriberRecords(env, options = {}) {
   const page = clampAdminSubscriberPage(options.page);
   const pageSize = clampAdminSubscriberPageSize(options.pageSize);
   const offset = (page - 1) * pageSize;
+  const emailSearch = normalizeAdminEmailSearch(options.emailSearch);
+
+  if (emailSearch) {
+    return getAdminSubscriberSearchRecords(env, {
+      page,
+      pageSize,
+      emailSearch,
+      managementBaseUrl: options.managementBaseUrl,
+    });
+  }
+
   const summaryQuery = `
         SELECT
           COUNT(*) AS total,

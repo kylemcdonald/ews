@@ -1034,6 +1034,36 @@ html.emergency-color-scheme .map-control-button:hover:not(:disabled) {
   overflow-wrap: anywhere;
 }
 
+.subscriber-search-form {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.subscriber-search-field {
+  width: min(100%, 360px);
+}
+
+.subscriber-search-clear {
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid #999999;
+  background: #ffffff;
+  color: #000000;
+  cursor: pointer;
+}
+
+.subscriber-search-clear:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.subscriber-search-note {
+  margin: 0;
+  font-size: 13px;
+}
+
 .subscriber-chart-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
