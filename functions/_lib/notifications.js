@@ -1056,32 +1056,6 @@ export async function maybeSendLevel5Notifications(env, snapshot, { source = "sc
   };
 }
 
-export async function sendAdminTestToAll(env, snapshot) {
-  const messageText = formatEmergencyNotification(snapshot, { test: true, alertUrl: getAlertUrl(env) });
-  const alertId = await createAlertRecord(env, {
-    kind: "admin_test_all",
-    source: "admin",
-    level: 5,
-    slotKey: getLatestSlotKey(snapshot),
-    messageText,
-  });
-  const subscribers = await getActiveSubscribers(env);
-  const summary = await sendAlertToSubscribers(env, {
-    alertId,
-    subscribers,
-    messageText,
-    subject: "TEST: Apocalypse EWS emergency alert",
-    includeCustomerPortalLinks: true,
-  });
-
-  return {
-    ok: summary.errorCount === 0,
-    sent: true,
-    alertId,
-    ...summary,
-  };
-}
-
 export async function sendAdminSingleTest(env, { email, phone }) {
   const snapshot = {
     signals: {

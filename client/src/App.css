@@ -880,8 +880,7 @@ html.emergency-color-scheme .map-control-button:hover:not(:disabled) {
 
 .signup-field input:focus-visible,
 .signup-consent input:focus-visible,
-.signup-submit:focus-visible,
-.mode-control button:focus-visible {
+.signup-submit:focus-visible {
   outline: 1px dotted #000000;
   outline-offset: 2px;
 }
@@ -914,31 +913,6 @@ html.emergency-color-scheme .map-control-button:hover:not(:disabled) {
 
 .signup-submit:hover {
   background: #e5e5e5;
-}
-
-.mode-control {
-  display: inline-grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  width: min(100%, 280px);
-  border: 1px solid #999999;
-}
-
-.mode-control button {
-  min-height: 36px;
-  border: 0;
-  border-right: 1px solid #999999;
-  background: #ffffff;
-  color: #000000;
-  cursor: pointer;
-}
-
-.mode-control button:last-child {
-  border-right: 0;
-}
-
-.mode-control-active {
-  background: #e8e8e8 !important;
-  font-weight: 700;
 }
 
 .admin-tabs {

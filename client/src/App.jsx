@@ -4307,10 +4307,8 @@ function ManageSubscriptionPage() {
 function AdminTestAlertPage() {
   const adminPath = window.location.pathname.replace(/\/+$/, '')
   const adminView = adminPath === '/admin/subscribers' ? 'subscribers' : adminPath === '/admin/manual' ? 'manual' : 'test'
-  const [mode, setMode] = useState('single')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
-  const [confirmAll, setConfirmAll] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [status, setStatus] = useState(null)
   const [messagingStatus, setMessagingStatus] = useState(null)
@@ -4438,15 +4436,7 @@ function AdminTestAlertPage() {
   async function handleSubmit(event) {
     event.preventDefault()
 
-    if (mode === 'all' && !confirmAll) {
-      setStatus({
-        tone: 'error',
-        message: 'Confirm the all-subscriber test before sending.',
-      })
-      return
-    }
-
-    if (mode === 'single' && !email.trim() && !phone.trim()) {
+    if (!email.trim() && !phone.trim()) {
       setStatus({
         tone: 'error',
         message: 'Enter a test email address, phone number, or both.',
@@ -4467,7 +4457,6 @@ function AdminTestAlertPage() {
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          mode,
           email: email.trim(),
           phone: phone.trim(),
         }),
@@ -4675,60 +4664,30 @@ function AdminTestAlertPage() {
                 ) : null}
               </section>
               <form className="signup-form" onSubmit={handleSubmit}>
-                <div className="mode-control" role="group" aria-label="Test mode">
-                  <button
-                    className={mode === 'single' ? 'mode-control-active' : ''}
-                    type="button"
-                    onClick={() => setMode('single')}
-                  >
-                    Single
-                  </button>
-                  <button
-                    className={mode === 'all' ? 'mode-control-active' : ''}
-                    type="button"
-                    onClick={() => setMode('all')}
-                  >
-                    All Active
-                  </button>
-                </div>
+                <label className="signup-field">
+                  <span>Email address</span>
+                  <input
+                    type="email"
+                    name="email"
+                    value={email}
+                    autoComplete="email"
+                    placeholder="you@example.com"
+                    onChange={(event) => setEmail(event.target.value)}
+                  />
+                </label>
 
-                {mode === 'single' ? (
-                  <>
-                    <label className="signup-field">
-                      <span>Email address</span>
-                      <input
-                        type="email"
-                        name="email"
-                        value={email}
-                        autoComplete="email"
-                        placeholder="you@example.com"
-                        onChange={(event) => setEmail(event.target.value)}
-                      />
-                    </label>
-
-                    <label className="signup-field">
-                      <span>Phone number</span>
-                      <input
-                        type="tel"
-                        name="phone"
-                        value={phone}
-                        autoComplete="tel"
-                        inputMode="tel"
-                        placeholder="+1 415 555 2671"
-                        onChange={(event) => setPhone(event.target.value)}
-                      />
-                    </label>
-                  </>
-                ) : (
-                  <label className="signup-consent">
-                    <input
-                      type="checkbox"
-                      checked={confirmAll}
-                      onChange={(event) => setConfirmAll(event.target.checked)}
-                    />
-                    <span>Send this test alert to every active paid subscriber.</span>
-                  </label>
-                )}
+                <label className="signup-field">
+                  <span>Phone number</span>
+                  <input
+                    type="tel"
+                    name="phone"
+                    value={phone}
+                    autoComplete="tel"
+                    inputMode="tel"
+                    placeholder="+1 415 555 2671"
+                    onChange={(event) => setPhone(event.target.value)}
+                  />
+                </label>
 
                 <button className="signup-submit" type="submit" disabled={submitting}>
                   {submitting ? 'Sending...' : 'Send Test Alert'}
