@@ -1489,6 +1489,10 @@ function normalizeAdminEmailSearch(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizePhoneSearchDigits(value) {
+  return String(value || "").replace(/\D+/g, "");
+}
+
 function subscriberStatusRank(status) {
   if (status === SUBSCRIBER_STATUS.ACTIVE) {
     return 0;
@@ -1820,6 +1824,7 @@ export async function getAdminSubscriberMessageHistory(env, subscriberId, option
 }
 
 async function getAdminSubscriberSearchRecords(env, { page, pageSize, emailSearch, managementBaseUrl }) {
+  const phoneSearchDigits = normalizePhoneSearchDigits(emailSearch);
   const subscribersQuery = `
         SELECT *
         FROM notification_signups
@@ -1837,13 +1842,18 @@ async function getAdminSubscriberSearchRecords(env, { page, pageSize, emailSearc
   const matchedRows = [];
 
   for (const row of rows) {
-    const [email, accountEmail] = await Promise.all([
+    const [email, accountEmail, phone] = await Promise.all([
       decryptString(env, row.email_cipher),
       decryptString(env, row.account_email_cipher),
+      decryptString(env, row.phone_cipher),
     ]);
+    const phoneText = String(phone || "").toLowerCase();
+    const phoneDigits = normalizePhoneSearchDigits(phone);
     if (
       String(email || "").toLowerCase().includes(emailSearch) ||
-      String(accountEmail || "").toLowerCase().includes(emailSearch)
+      String(accountEmail || "").toLowerCase().includes(emailSearch) ||
+      phoneText.includes(emailSearch) ||
+      (phoneSearchDigits && phoneDigits.includes(phoneSearchDigits))
     ) {
       matchedRows.push(row);
     }

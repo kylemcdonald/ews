@@ -4999,11 +4999,11 @@ function AdminTestAlertPage() {
 
               <form className="subscriber-search-form" onSubmit={handleSubscriberSearchSubmit}>
                 <label className="signup-field subscriber-search-field">
-                  <span>Email search</span>
+                  <span>Email or phone search</span>
                   <input
                     type="search"
                     value={subscriberSearchInput}
-                    placeholder="exact or partial email"
+                    placeholder="exact or partial email/phone"
                     autoComplete="off"
                     onChange={(event) => setSubscriberSearchInput(event.target.value)}
                   />
@@ -5020,7 +5020,7 @@ function AdminTestAlertPage() {
 
               {subscriberEmailSearch ? (
                 <p className="subscriber-search-note">
-                  Email search: <strong>{subscriberEmailSearch}</strong>
+                  Search: <strong>{subscriberEmailSearch}</strong>
                 </p>
               ) : null}
 
@@ -5663,7 +5663,8 @@ function App() {
   if (
     window.location.pathname === '/admin' ||
     window.location.pathname === '/admin/subscribers' ||
-    window.location.pathname === '/admin/manual'
+    window.location.pathname === '/admin/manual' ||
+    window.location.pathname === '/admin/history'
   ) {
     return <AdminTestAlertPage />
   }
