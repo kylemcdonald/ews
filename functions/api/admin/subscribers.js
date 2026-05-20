@@ -4,11 +4,7 @@ import {
 } from "../../_lib/db.js";
 import { createAccountManagementLink } from "../../_lib/customer-portal.js";
 import { handleError, HttpError, jsonResponse, getRequestIp, getRequestUserAgent, readJsonRequest } from "../../_lib/http.js";
-import {
-  previewSmsDeliveryIssueEmails,
-  sendSignupConfirmationToSubscriber,
-  sendSmsDeliveryIssueEmailBatch,
-} from "../../_lib/notifications.js";
+import { sendSignupConfirmationToSubscriber } from "../../_lib/notifications.js";
 
 function getNotificationBaseUrl(env) {
   return String(env.EWS_NOTIFICATION_URL || "https://aews.cc/")
@@ -51,21 +47,6 @@ export async function onRequestPost({ request, env }) {
         subscriber: await mapSubscriberResult(env, subscriber),
         signupConfirmation,
       });
-    }
-
-    if (action === "preview_sms_delivery_issue_emails") {
-      return jsonResponse(await previewSmsDeliveryIssueEmails(env));
-    }
-
-    if (action === "send_sms_delivery_issue_email_batch") {
-      if (payload.confirm !== "send-sms-delivery-issue-emails") {
-        throw new HttpError(400, "Confirm SMS delivery issue email sending before starting the batch.");
-      }
-      const summary = await sendSmsDeliveryIssueEmailBatch(env, {
-        cursor: payload.cursor,
-        limit: payload.limit,
-      });
-      return jsonResponse(summary);
     }
 
     throw new HttpError(400, "Unknown subscriber admin action.");
