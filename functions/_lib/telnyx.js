@@ -115,6 +115,7 @@ export async function sendTelnyxMessage(env, { to, text, useStatusWebhook = true
   return {
     id: payload.data?.id || null,
     cost: payload.data?.cost || null,
+    providerStatus: payload.data?.to?.[0]?.status || payload.data?.status || null,
   };
 }
 
@@ -233,16 +234,23 @@ export function classifyInboundSms(body) {
   return "unknown";
 }
 
+export function getTelnyxProviderMessageStatus(payload = {}) {
+  return String(payload.to?.[0]?.status || payload.from?.status || payload.status || "").trim().toLowerCase();
+}
+
 export function normalizeTelnyxMessageStatus(eventType, payload = {}) {
-  const status = String(payload.to?.[0]?.status || payload.from?.status || "").trim().toLowerCase();
+  const status = getTelnyxProviderMessageStatus(payload);
   if (status === "delivered") {
     return "delivered";
   }
   if (status === "sending_failed") {
     return "failed";
   }
-  if (status === "delivery_failed" || status === "delivery_unconfirmed") {
+  if (status === "delivery_failed") {
     return "undelivered";
+  }
+  if (status === "delivery_unconfirmed") {
+    return "unconfirmed";
   }
   if (["queued", "sending", "sent", "webhook_delivered"].includes(status) || eventType === "message.sent") {
     return "sent";

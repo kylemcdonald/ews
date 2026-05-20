@@ -268,6 +268,7 @@ async function sendDelivery(env, { alertId, subscriberId, channel, destination, 
       destinationHash,
       status: "sent",
       providerMessageId: result.id,
+      providerStatus: result.providerStatus || null,
       messageText: text,
       subject,
     });

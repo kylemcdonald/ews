@@ -4858,6 +4858,7 @@ function AdminTestAlertPage() {
                           <td>
                             <span>Kind: {formatMessageHistoryLabel(message.kind)}</span>
                             <span>Provider: {formatAdminValue(message.source)}</span>
+                            {message.providerStatus ? <span>Provider status: {formatMessageHistoryLabel(message.providerStatus)}</span> : null}
                             <span>Message ID: {formatAdminValue(message.providerMessageId)}</span>
                             {message.alertId ? <span>Alert: {message.alertId}</span> : null}
                             {message.fromPhone ? <span>From: {message.fromPhone}</span> : null}

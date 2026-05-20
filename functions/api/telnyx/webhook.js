@@ -12,6 +12,7 @@ import { maybeSendSmsDeliveryIssueEmail } from "../../_lib/notifications.js";
 import { updateStripeSubscriptionCancelAtPeriodEnd } from "../../_lib/stripe.js";
 import {
   classifyInboundSms,
+  getTelnyxProviderMessageStatus,
   getTelnyxDeliveryError,
   hasTelnyxWebhookVerificationKey,
   normalizeTelnyxMessageStatus,
@@ -93,10 +94,12 @@ async function handleInboundMessage(env, event, payload) {
 
 async function handleOutboundStatus(env, eventType, payload) {
   const messageId = payload.id || null;
+  const providerStatus = getTelnyxProviderMessageStatus(payload);
   const status = normalizeTelnyxMessageStatus(eventType, payload);
   const error = getTelnyxDeliveryError(payload);
   const deliveryUpdate = await updateDeliveryByProviderMessageId(env, messageId, {
     status,
+    providerStatus,
     error,
   });
   let smsDeliveryIssueEmail = null;

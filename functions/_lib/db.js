@@ -1256,13 +1256,14 @@ export async function recordDelivery(env, delivery) {
           destination_hash,
           status,
           provider_message_id,
+          provider_status,
           error,
           message_text_cipher,
           subject,
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     )
     .bind(
@@ -1273,6 +1274,7 @@ export async function recordDelivery(env, delivery) {
       delivery.destinationHash || null,
       delivery.status,
       delivery.providerMessageId || null,
+      delivery.providerStatus || null,
       delivery.error ? String(delivery.error).slice(0, 1000) : null,
       messageTextCipher,
       delivery.subject ? String(delivery.subject).slice(0, 500) : null,
@@ -1429,6 +1431,7 @@ export async function getRecentAlertDeliveries(env, limit = 25) {
           d.channel,
           d.status AS delivery_status,
           d.provider_message_id,
+          d.provider_status,
           d.error,
           d.created_at AS delivery_created_at,
           d.updated_at AS delivery_updated_at
@@ -1701,6 +1704,7 @@ async function mapOutboundHistoryRow(env, row) {
     kind: row.kind,
     source: row.source,
     status: row.delivery_status,
+    providerStatus: row.provider_status,
     subject: row.subject,
     messageText,
     providerMessageId: row.provider_message_id,
@@ -1771,6 +1775,7 @@ export async function getAdminSubscriberMessageHistory(env, subscriberId, option
           d.channel,
           d.status AS delivery_status,
           d.provider_message_id,
+          d.provider_status,
           d.error,
           d.message_text_cipher,
           d.subject,
@@ -2033,7 +2038,7 @@ export async function getSubscriberForCustomerPortal(env, subscriberId) {
     .first();
 }
 
-export async function updateDeliveryByProviderMessageId(env, providerMessageId, { status, error = null }) {
+export async function updateDeliveryByProviderMessageId(env, providerMessageId, { status, providerStatus = null, error = null }) {
   if (!providerMessageId) {
     return null;
   }
@@ -2066,12 +2071,13 @@ export async function updateDeliveryByProviderMessageId(env, providerMessageId, 
         UPDATE notification_deliveries
         SET
           status = ?,
+          provider_status = ?,
           error = ?,
           updated_at = ?
         WHERE id = ?
       `,
     )
-    .bind(status, error ? String(error).slice(0, 1000) : null, nowIso(), existing.id)
+    .bind(status, providerStatus, error ? String(error).slice(0, 1000) : null, nowIso(), existing.id)
     .run();
 
   await recalculateAlertDeliveryCounts(env, existing.alert_id);
