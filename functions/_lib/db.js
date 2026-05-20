@@ -615,15 +615,6 @@ export async function getSubscriberById(env, subscriberId) {
   return getDb(env).prepare("SELECT * FROM notification_signups WHERE id = ?").bind(subscriberId).first();
 }
 
-function clampSignupConfirmationBatchLimit(value) {
-  const limit = Math.trunc(Number(value || 5));
-  if (!Number.isFinite(limit) || limit <= 0) {
-    return 5;
-  }
-
-  return Math.min(limit, 10);
-}
-
 function clampSmsDeliveryIssueEmailBatchLimit(value) {
   const limit = Math.trunc(Number(value || 25));
   if (!Number.isFinite(limit) || limit <= 0) {
@@ -631,44 +622,6 @@ function clampSmsDeliveryIssueEmailBatchLimit(value) {
   }
 
   return Math.min(limit, 100);
-}
-
-export async function getSignupConfirmationBatchCandidates(env, options = {}) {
-  const cursor = String(options.cursor || "").trim();
-  const limit = clampSignupConfirmationBatchLimit(options.limit);
-  const { results } = await getDb(env)
-    .prepare(
-      `
-        SELECT *
-        FROM notification_signups
-        WHERE status = ?
-          AND id > ?
-          AND (
-            (
-              welcome_email_sent_at IS NULL
-              AND (
-                account_email_cipher IS NOT NULL
-                OR email_cipher IS NOT NULL
-              )
-            )
-            OR (
-              wants_sms = 1
-              AND welcome_sms_sent_at IS NULL
-              AND phone_cipher IS NOT NULL
-              AND (
-                phone_country IS NULL
-                OR phone_country IN ('US', 'CA')
-              )
-            )
-          )
-        ORDER BY id ASC
-        LIMIT ?
-      `,
-    )
-    .bind(SUBSCRIBER_STATUS.ACTIVE, cursor, limit)
-    .all();
-
-  return results || [];
 }
 
 export async function getSmsDeliveryIssueEmailCandidates(env, options = {}) {
@@ -836,6 +789,8 @@ export async function createManualSubscriber(env, payload = {}, requestContext =
             sms_opt_out_source = NULL,
             email_opted_out_at = NULL,
             email_opt_out_source = NULL,
+            welcome_email_sent_at = NULL,
+            welcome_sms_sent_at = NULL,
             stripe_cancel_at_period_end = 0,
             manual_note = ?,
             updated_at = ?
