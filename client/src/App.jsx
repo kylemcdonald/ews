@@ -3590,6 +3590,10 @@ function formatEmailPreview(message) {
   return text.length > 220 ? `${text.slice(0, 217)}...` : text
 }
 
+function formatEmailBody(message) {
+  return String(message?.messageText || '').trim() || 'No email body recorded.'
+}
+
 function createEmptySubscriberSummary() {
   return {
     total: 0,
@@ -4450,6 +4454,7 @@ function AdminTestAlertPage() {
   const [replyText, setReplyText] = useState('')
   const [replySubmitting, setReplySubmitting] = useState(false)
   const [replyStatus, setReplyStatus] = useState(null)
+  const [expandedEmailId, setExpandedEmailId] = useState(null)
   const subscriberPageCount = Math.max(1, Math.ceil(subscriberTotal / Math.max(1, subscriberPageSize)))
   const normalizedSubscriberPage = clamp(subscriberPage, 1, subscriberPageCount)
   const subscriberPageStartIndex = subscriberRecords.length ? (normalizedSubscriberPage - 1) * subscriberPageSize : 0
@@ -4572,6 +4577,7 @@ function AdminTestAlertPage() {
   useEffect(() => {
     setReplyText('')
     setReplyStatus(null)
+    setExpandedEmailId(null)
   }, [historySubscriberId])
 
   useEffect(() => {
@@ -4806,6 +4812,9 @@ function AdminTestAlertPage() {
   const canTextReply = Boolean(messageHistory?.subscriber?.phone)
   const replyCharactersRemaining = ADMIN_REPLY_MAX_LENGTH - replyText.length
   const replyDisabled = replySubmitting || !canTextReply || !replyText.trim() || replyText.length > ADMIN_REPLY_MAX_LENGTH
+  const toggleExpandedEmail = (messageId) => {
+    setExpandedEmailId((current) => (current === messageId ? null : messageId))
+  }
 
   return (
     <>
@@ -4994,40 +5003,79 @@ function AdminTestAlertPage() {
                 </div>
               ) : null}
 
-              {smsConversationMessages.length ? (
-                <div className="sms-conversation" aria-label="SMS conversation">
-                  {smsConversationMessages.map((message) => {
-                    const isOutbound = message.direction === 'outbound'
-                    const deliveryStatus = formatMessageDeliveryStatus(message)
-                    return (
-                      <article
-                        className={`sms-message-row ${isOutbound ? 'sms-message-outbound' : 'sms-message-inbound'}`}
-                        key={`${message.direction}-${message.id}`}
-                        title={formatMessageHistoryTime(message.occurredAt)}
-                        aria-label={`${formatMessageHistoryLabel(message.direction)} SMS, ${formatMessageHistoryTime(message.occurredAt)}`}
-                      >
-                        <div className="sms-bubble">
-                          {message.messageText ? (
-                            <p>{message.messageText}</p>
-                          ) : (
-                            <p className="sms-empty-text">No message text</p>
-                          )}
-                          {message.action && !isOutbound ? (
-                            <span className="sms-message-action">{formatMessageHistoryLabel(message.action)}</span>
-                          ) : null}
-                          {message.error ? <em>{message.error}</em> : null}
-                        </div>
-                        {isOutbound ? (
-                          <span className={`sms-delivery-status ${isMessageDeliveryError(message) ? 'sms-delivery-status-error' : ''}`}>
-                            {deliveryStatus}
-                          </span>
-                        ) : null}
-                      </article>
-                    )
-                  })}
-                </div>
-              ) : messageHistory && !historyLoading ? (
-                <p className="empty-state">No SMS message history found for this subscriber.</p>
+              {messageHistory && !historyLoading ? (
+                <section className="sms-history-card" aria-labelledby="sms-history-title">
+                  <div className="gmail-history-toolbar">
+                    <h3 id="sms-history-title">SMS History</h3>
+                    <span>{smsConversationMessages.length}</span>
+                  </div>
+                  {smsConversationMessages.length ? (
+                    <div className="sms-conversation" aria-label="SMS conversation">
+                      {smsConversationMessages.map((message) => {
+                        const isOutbound = message.direction === 'outbound'
+                        const deliveryStatus = formatMessageDeliveryStatus(message)
+                        return (
+                          <article
+                            className={`sms-message-row ${isOutbound ? 'sms-message-outbound' : 'sms-message-inbound'}`}
+                            key={`${message.direction}-${message.id}`}
+                            title={formatMessageHistoryTime(message.occurredAt)}
+                            aria-label={`${formatMessageHistoryLabel(message.direction)} SMS, ${formatMessageHistoryTime(message.occurredAt)}`}
+                          >
+                            <div className="sms-bubble">
+                              {message.messageText ? (
+                                <p>{message.messageText}</p>
+                              ) : (
+                                <p className="sms-empty-text">No message text</p>
+                              )}
+                              {message.action && !isOutbound ? (
+                                <span className="sms-message-action">{formatMessageHistoryLabel(message.action)}</span>
+                              ) : null}
+                              {message.error ? <em>{message.error}</em> : null}
+                            </div>
+                            {isOutbound ? (
+                              <span className={`sms-delivery-status ${isMessageDeliveryError(message) ? 'sms-delivery-status-error' : ''}`}>
+                                {deliveryStatus}
+                              </span>
+                            ) : null}
+                          </article>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="empty-state sms-history-empty">No SMS message history found for this subscriber.</p>
+                  )}
+
+                  {messageHistory.subscriber ? (
+                    <form className="sms-reply-form" onSubmit={handleReplySubmit}>
+                      <label className="signup-field">
+                        <span>Text reply</span>
+                        <textarea
+                          value={replyText}
+                          maxLength={ADMIN_REPLY_MAX_LENGTH}
+                          rows={3}
+                          disabled={replySubmitting || !canTextReply}
+                          onChange={(event) => setReplyText(event.target.value)}
+                        />
+                      </label>
+                      <div className="sms-reply-actions">
+                        <button className="signup-submit" type="submit" disabled={replyDisabled}>
+                          {replySubmitting ? 'Sending...' : 'Send Reply'}
+                        </button>
+                        <span className={replyCharactersRemaining < 0 ? 'sms-reply-count sms-reply-count-error' : 'sms-reply-count'}>
+                          {replyCharactersRemaining}
+                        </span>
+                      </div>
+                      {!canTextReply ? (
+                        <p className="signup-status signup-status-error">This subscriber does not have a phone number.</p>
+                      ) : null}
+                      {replyStatus ? (
+                        <p className={`signup-status signup-status-${replyStatus.tone}`} role="status">
+                          {replyStatus.message}
+                        </p>
+                      ) : null}
+                    </form>
+                  ) : null}
+                </section>
               ) : null}
 
               {messageHistory && !historyLoading ? (
@@ -5038,66 +5086,52 @@ function AdminTestAlertPage() {
                   </div>
                   {emailHistoryMessages.length ? (
                     <div className="gmail-message-list">
-                      {emailHistoryMessages.map((message) => (
-                        <article className="gmail-message-row" key={`${message.direction}-${message.id}`} title={formatMessageHistoryTime(message.occurredAt)}>
-                          <div className="gmail-sender-avatar" aria-hidden="true">
-                            A
-                          </div>
-                          <div className="gmail-message-main">
-                            <div className="gmail-message-header">
-                              <strong>Apocalypse EWS</strong>
-                              <span>to {formatAdminValue(messageHistory.subscriber?.email || messageHistory.subscriber?.accountEmail)}</span>
-                            </div>
-                            <p>
-                              <strong>{formatEmailSubject(message)}</strong>
-                              <span>{formatEmailPreview(message)}</span>
-                            </p>
-                            {message.error ? <em>{message.error}</em> : null}
-                          </div>
-                          <div className="gmail-message-meta">
-                            <time dateTime={message.occurredAt || undefined}>{formatMessageHistoryTime(message.occurredAt)}</time>
-                            <span className={isMessageDeliveryError(message) ? 'gmail-status gmail-status-error' : 'gmail-status'}>
-                              {formatMessageDeliveryStatus(message)}
-                            </span>
-                          </div>
-                        </article>
-                      ))}
+                      {emailHistoryMessages.map((message) => {
+                        const messageKey = `${message.direction}-${message.id}`
+                        const isExpanded = expandedEmailId === messageKey
+                        return (
+                          <article className={`gmail-message-row ${isExpanded ? 'gmail-message-row-expanded' : ''}`} key={messageKey}>
+                            <button
+                              className="gmail-message-summary"
+                              type="button"
+                              title={formatMessageHistoryTime(message.occurredAt)}
+                              aria-expanded={isExpanded}
+                              onClick={() => toggleExpandedEmail(messageKey)}
+                            >
+                              <div className="gmail-sender-avatar" aria-hidden="true">
+                                A
+                              </div>
+                              <div className="gmail-message-main">
+                                <div className="gmail-message-header">
+                                  <strong>Apocalypse EWS</strong>
+                                  <span>to {formatAdminValue(messageHistory.subscriber?.email || messageHistory.subscriber?.accountEmail)}</span>
+                                </div>
+                                <p>
+                                  <strong>{formatEmailSubject(message)}</strong>
+                                  <span>{formatEmailPreview(message)}</span>
+                                </p>
+                                {message.error ? <em>{message.error}</em> : null}
+                              </div>
+                              <div className="gmail-message-meta">
+                                <time dateTime={message.occurredAt || undefined}>{formatMessageHistoryTime(message.occurredAt)}</time>
+                                <span className={isMessageDeliveryError(message) ? 'gmail-status gmail-status-error' : 'gmail-status'}>
+                                  {formatMessageDeliveryStatus(message)}
+                                </span>
+                              </div>
+                            </button>
+                            {isExpanded ? (
+                              <div className="gmail-message-body">
+                                <pre>{formatEmailBody(message)}</pre>
+                              </div>
+                            ) : null}
+                          </article>
+                        )
+                      })}
                     </div>
                   ) : (
                     <p className="empty-state">No sent email history found for this subscriber.</p>
                   )}
                 </section>
-              ) : null}
-
-              {messageHistory?.subscriber ? (
-                <form className="sms-reply-form" onSubmit={handleReplySubmit}>
-                  <label className="signup-field">
-                    <span>Text reply</span>
-                    <textarea
-                      value={replyText}
-                      maxLength={ADMIN_REPLY_MAX_LENGTH}
-                      rows={3}
-                      disabled={replySubmitting || !canTextReply}
-                      onChange={(event) => setReplyText(event.target.value)}
-                    />
-                  </label>
-                  <div className="sms-reply-actions">
-                    <button className="signup-submit" type="submit" disabled={replyDisabled}>
-                      {replySubmitting ? 'Sending...' : 'Send Reply'}
-                    </button>
-                    <span className={replyCharactersRemaining < 0 ? 'sms-reply-count sms-reply-count-error' : 'sms-reply-count'}>
-                      {replyCharactersRemaining}
-                    </span>
-                  </div>
-                  {!canTextReply ? (
-                    <p className="signup-status signup-status-error">This subscriber does not have a phone number.</p>
-                  ) : null}
-                  {replyStatus ? (
-                    <p className={`signup-status signup-status-${replyStatus.tone}`} role="status">
-                      {replyStatus.message}
-                    </p>
-                  ) : null}
-                </form>
               ) : null}
             </section>
           ) : adminView === 'manual' ? (
