@@ -1598,6 +1598,15 @@ function compareSubscriberRows(left, right) {
   return String(left.id || "").localeCompare(String(right.id || ""));
 }
 
+function compareSubscriberRowsBySmsReplyRecency(left, right) {
+  const replyDiff = String(right.last_sms_reply_at || "").localeCompare(String(left.last_sms_reply_at || ""));
+  if (replyDiff !== 0) {
+    return replyDiff;
+  }
+
+  return compareSubscriberRows(left, right);
+}
+
 function mapSubscriberSummaryFromRows(rows) {
   const summary = {
     total: rows.length,
@@ -1717,6 +1726,15 @@ function buildSmsReplyExistsSql(subscriberAlias = "s") {
           WHERE im.subscriber_id = ${subscriberAlias}.id
              OR (${subscriberAlias}.phone_hash IS NOT NULL AND im.phone_hash = ${subscriberAlias}.phone_hash)
         )`;
+}
+
+function buildLastSmsReplyAtSql(subscriberAlias = "s") {
+  return `(
+            SELECT MAX(im.received_at)
+            FROM notification_inbound_messages im
+            WHERE im.subscriber_id = ${subscriberAlias}.id
+               OR (${subscriberAlias}.phone_hash IS NOT NULL AND im.phone_hash = ${subscriberAlias}.phone_hash)
+          )`;
 }
 
 async function getSmsReplyStatsForSubscriberRows(env, rows) {
@@ -2024,6 +2042,9 @@ async function getAdminSubscriberSearchRecords(env, { page, pageSize, emailSearc
   const filteredRows = hasSmsReplies
     ? matchedRowsWithReplyStats.filter((row) => Number(row.sms_reply_count || 0) > 0)
     : matchedRowsWithReplyStats;
+  if (hasSmsReplies) {
+    filteredRows.sort(compareSubscriberRowsBySmsReplyRecency);
+  }
   const offset = (page - 1) * pageSize;
   const pageRows = filteredRows.slice(offset, offset + pageSize);
   const deliveryStatsBySubscriber = new Map();
@@ -2087,6 +2108,40 @@ export async function getAdminSubscriberRecords(env, options = {}) {
   }
 
   const subscriberWhereClause = hasSmsReplies ? `WHERE ${buildSmsReplyExistsSql("s")}` : "";
+  const subscriberOrderBy = hasSmsReplies
+    ? `
+          ORDER BY
+            ${buildLastSmsReplyAtSql("s")} DESC,
+            s.id ASC
+        `
+    : `
+          ORDER BY
+            CASE s.status
+              WHEN 'active' THEN 0
+              WHEN 'pending_checkout' THEN 1
+              WHEN 'past_due' THEN 2
+              ELSE 3
+            END,
+            s.updated_at DESC,
+            s.id ASC
+        `;
+  const subscriberOuterOrderBy = hasSmsReplies
+    ? `
+        ORDER BY
+          last_sms_reply_at DESC,
+          s.id ASC
+      `
+    : `
+        ORDER BY
+          CASE s.status
+            WHEN 'active' THEN 0
+            WHEN 'pending_checkout' THEN 1
+            WHEN 'past_due' THEN 2
+            ELSE 3
+          END,
+          s.updated_at DESC,
+          s.id ASC
+      `;
   const summaryQuery = `
         SELECT
           COUNT(*) AS total,
@@ -2145,38 +2200,17 @@ export async function getAdminSubscriberRecords(env, options = {}) {
             WHERE im.subscriber_id = s.id
                OR (s.phone_hash IS NOT NULL AND im.phone_hash = s.phone_hash)
           ) AS sms_reply_count,
-          (
-            SELECT MAX(im.received_at)
-            FROM notification_inbound_messages im
-            WHERE im.subscriber_id = s.id
-               OR (s.phone_hash IS NOT NULL AND im.phone_hash = s.phone_hash)
-          ) AS last_sms_reply_at
+          ${buildLastSmsReplyAtSql("s")} AS last_sms_reply_at
         FROM (
           SELECT s.*
           FROM notification_signups s
           ${subscriberWhereClause}
-          ORDER BY
-            CASE s.status
-              WHEN 'active' THEN 0
-              WHEN 'pending_checkout' THEN 1
-              WHEN 'past_due' THEN 2
-              ELSE 3
-            END,
-            s.updated_at DESC,
-            s.id ASC
+          ${subscriberOrderBy}
           LIMIT ? OFFSET ?
         ) s
         LEFT JOIN notification_deliveries d ON d.subscriber_id = s.id
         GROUP BY s.id
-        ORDER BY
-          CASE s.status
-            WHEN 'active' THEN 0
-            WHEN 'pending_checkout' THEN 1
-            WHEN 'past_due' THEN 2
-            ELSE 3
-          END,
-          s.updated_at DESC,
-          s.id ASC
+        ${subscriberOuterOrderBy}
       `;
 
   const [summaryRows, dailyStatsRows, subscriberRows] = await Promise.all([
