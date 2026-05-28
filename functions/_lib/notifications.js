@@ -81,16 +81,20 @@ export function getEmergencyLevel(snapshot) {
   return Math.round(Number(getEmergencySnapshotSignal(snapshot)?.emergencyLevel || 1));
 }
 
-export function formatEmergencyNotification(snapshot, { test = false, alertUrl = DEFAULT_NOTIFICATION_URL } = {}) {
+export function formatEmergencyNotification(
+  snapshot,
+  { test = false, alertUrl = DEFAULT_NOTIFICATION_URL, includeAlertUrl = true } = {},
+) {
   const signal = getEmergencySnapshotSignal(snapshot);
   const actualCount = Number(signal?.actualConcurrentCount ?? snapshot?.current?.concurrentCount ?? 0);
   const expectedCount = Number(signal?.expectedConcurrentCount ?? snapshot?.current?.baselineMean ?? 0);
   const aboveExpectedCount = actualCount - expectedCount;
   const prefix = test ? "TEST ALERT: " : "";
-
-  return `${prefix}Apocalypse EWS: emergency level 5. ${formatCount(actualCount)} airborne (${formatSignedCount(
+  const message = `${prefix}Apocalypse EWS: emergency level 5. ${formatCount(actualCount)} airborne (${formatSignedCount(
     aboveExpectedCount,
-  )} vs expected). ${alertUrl}`;
+  )} vs expected).`;
+
+  return includeAlertUrl ? `${message} ${alertUrl}` : message;
 }
 
 function getAlertUrl(env) {
@@ -526,6 +530,7 @@ async function sendAlertToSubscribers(
     alertId,
     subscribers,
     messageText,
+    smsMessageText = messageText,
     subject,
     includeCustomerPortalLinks = false,
     emailContentFactory = null,
@@ -603,7 +608,7 @@ async function sendAlertToSubscribers(
         subscriberId: hydrated.id,
         channel: "sms",
         destination: hydrated.phone,
-        text: messageText,
+        text: smsMessageText,
       });
       if (result.ok) {
         subscriberSummary.smsSentCount += 1;
@@ -1061,6 +1066,7 @@ export async function maybeSendLevel5Notifications(env, snapshot, { source = "sc
   await setMetaValue(env, LEVEL5_COOLDOWN_META_KEY, triggeredAt);
 
   const messageText = formatEmergencyNotification(snapshot, { alertUrl: getAlertUrl(env) });
+  const smsMessageText = formatEmergencyNotification(snapshot, { includeAlertUrl: false });
   const alertId = await createAlertRecord(env, {
     kind: "level5",
     source,
@@ -1075,6 +1081,7 @@ export async function maybeSendLevel5Notifications(env, snapshot, { source = "sc
     alertId,
     subscribers,
     messageText,
+    smsMessageText,
     subject: "Apocalypse EWS: emergency level 5",
     emailContentFactory: (subscriber, managementUrl) => getLevel5EmailContent(env, snapshot, subscriber, managementUrl),
     concurrency,
@@ -1105,6 +1112,7 @@ export async function sendAdminSingleTest(env, { email, phone }) {
     },
   };
   const messageText = formatEmergencyNotification(snapshot, { test: true, alertUrl: getAlertUrl(env) });
+  const smsMessageText = formatEmergencyNotification(snapshot, { test: true, includeAlertUrl: false });
   const alertId = await createAlertRecord(env, {
     kind: "admin_test_single",
     source: "admin",
@@ -1139,7 +1147,7 @@ export async function sendAdminSingleTest(env, { email, phone }) {
       alertId,
       channel: "sms",
       destination: phone,
-      text: messageText,
+      text: smsMessageText,
     });
     if (result.ok) {
       summary.smsSentCount += 1;

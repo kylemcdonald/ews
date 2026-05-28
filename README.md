@@ -206,7 +206,7 @@ NOTIFICATION_HASH_SECRET=...
 NOTIFICATION_ENCRYPTION_KEY=...
 ```
 
-`STRIPE_PRICE_ID` is optional. If it is blank, the signup function resolves the active `$5/year` price for `STRIPE_PRODUCT_ID`. `EWS_NOTIFICATION_URL` controls the short dashboard and manage/cancel URLs used in SMS and email notifications; keep `APP_BASE_URL` and `EWS_PUBLIC_URL` on the canonical hostname. `TELNYX_NUMBER` is the E.164 sender number. `TELNYX_PUBLIC_KEY` is required to process webhooks and is available in the Telnyx Mission Control Portal under Keys & Credentials. Without it, webhooks are acknowledged but ignored. `TELNYX_WEBHOOK_URL` is optional; if it is blank, outbound SMS sends use `${APP_BASE_URL}/api/telnyx/webhook` for delivery callbacks. Generate `NOTIFICATION_ENCRYPTION_KEY` with:
+`STRIPE_PRICE_ID` is optional. If it is blank, the signup function resolves the active `$5/year` price for `STRIPE_PRODUCT_ID`. `EWS_NOTIFICATION_URL` controls the short dashboard and manage/cancel URLs used in email notifications and account-management flows; emergency SMS alerts intentionally omit URLs. Keep `APP_BASE_URL` and `EWS_PUBLIC_URL` on the canonical hostname. `TELNYX_NUMBER` is the E.164 sender number. `TELNYX_PUBLIC_KEY` is required to process webhooks and is available in the Telnyx Mission Control Portal under Keys & Credentials. Without it, webhooks are acknowledged but ignored. `TELNYX_WEBHOOK_URL` is optional; if it is blank, outbound SMS sends use `${APP_BASE_URL}/api/telnyx/webhook` for delivery callbacks. Generate `NOTIFICATION_ENCRYPTION_KEY` with:
 
 ```bash
 openssl rand -base64 32
