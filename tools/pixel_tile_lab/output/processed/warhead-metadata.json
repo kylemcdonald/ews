@@ -1,0 +1,102 @@
+{
+  "label": "Warhead",
+  "palette": [
+    [
+      3,
+      2,
+      2
+    ],
+    [
+      215,
+      10,
+      7
+    ],
+    [
+      99,
+      98,
+      98
+    ],
+    [
+      153,
+      152,
+      152
+    ],
+    [
+      230,
+      228,
+      227
+    ]
+  ],
+  "inferred_size": {
+    "width": 23,
+    "height": 24,
+    "score": 0.9791,
+    "outline_color": [
+      3,
+      2,
+      2
+    ],
+    "top_candidates": [
+      {
+        "width": 23,
+        "height": 24,
+        "score": 0.9791,
+        "outline_score": 1.0,
+        "shape_score": 0.9302
+      },
+      {
+        "width": 27,
+        "height": 28,
+        "score": 0.9771,
+        "outline_score": 0.9957,
+        "shape_score": 0.934
+      },
+      {
+        "width": 30,
+        "height": 31,
+        "score": 0.9755,
+        "outline_score": 0.9808,
+        "shape_score": 0.9634
+      },
+      {
+        "width": 29,
+        "height": 30,
+        "score": 0.9753,
+        "outline_score": 0.9887,
+        "shape_score": 0.944
+      },
+      {
+        "width": 22,
+        "height": 23,
+        "score": 0.9746,
+        "outline_score": 0.9966,
+        "shape_score": 0.9232
+      },
+      {
+        "width": 20,
+        "height": 21,
+        "score": 0.9743,
+        "outline_score": 1.0,
+        "shape_score": 0.9144
+      },
+      {
+        "width": 24,
+        "height": 25,
+        "score": 0.9741,
+        "outline_score": 0.9972,
+        "shape_score": 0.9202
+      },
+      {
+        "width": 21,
+        "height": 22,
+        "score": 0.9733,
+        "outline_score": 0.9964,
+        "shape_score": 0.9195
+      }
+    ]
+  },
+  "native_size": [
+    23,
+    24
+  ]
+}

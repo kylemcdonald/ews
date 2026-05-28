@@ -1,0 +1,102 @@
+{
+  "label": "Mushroom cloud",
+  "palette": [
+    [
+      5,
+      3,
+      2
+    ],
+    [
+      203,
+      55,
+      48
+    ],
+    [
+      146,
+      137,
+      135
+    ],
+    [
+      250,
+      161,
+      67
+    ],
+    [
+      247,
+      237,
+      166
+    ]
+  ],
+  "inferred_size": {
+    "width": 37,
+    "height": 40,
+    "score": 0.9884,
+    "outline_color": [
+      5,
+      3,
+      2
+    ],
+    "top_candidates": [
+      {
+        "width": 37,
+        "height": 40,
+        "score": 0.9884,
+        "outline_score": 1.0,
+        "shape_score": 0.9612
+      },
+      {
+        "width": 33,
+        "height": 35,
+        "score": 0.9871,
+        "outline_score": 1.0,
+        "shape_score": 0.9571
+      },
+      {
+        "width": 29,
+        "height": 31,
+        "score": 0.9859,
+        "outline_score": 1.0,
+        "shape_score": 0.9531
+      },
+      {
+        "width": 34,
+        "height": 36,
+        "score": 0.9854,
+        "outline_score": 1.0,
+        "shape_score": 0.9515
+      },
+      {
+        "width": 35,
+        "height": 37,
+        "score": 0.9852,
+        "outline_score": 1.0,
+        "shape_score": 0.9506
+      },
+      {
+        "width": 32,
+        "height": 34,
+        "score": 0.985,
+        "outline_score": 1.0,
+        "shape_score": 0.9501
+      },
+      {
+        "width": 36,
+        "height": 39,
+        "score": 0.9849,
+        "outline_score": 1.0,
+        "shape_score": 0.9495
+      },
+      {
+        "width": 31,
+        "height": 33,
+        "score": 0.9841,
+        "outline_score": 1.0,
+        "shape_score": 0.9471
+      }
+    ]
+  },
+  "native_size": [
+    37,
+    40
+  ]
+}

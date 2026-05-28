@@ -1,0 +1,97 @@
+{
+  "label": "Starburst explosion",
+  "palette": [
+    [
+      6,
+      2,
+      1
+    ],
+    [
+      242,
+      6,
+      3
+    ],
+    [
+      249,
+      161,
+      5
+    ],
+    [
+      245,
+      236,
+      140
+    ]
+  ],
+  "inferred_size": {
+    "width": 34,
+    "height": 34,
+    "score": 0.9846,
+    "outline_color": [
+      6,
+      2,
+      1
+    ],
+    "top_candidates": [
+      {
+        "width": 34,
+        "height": 34,
+        "score": 0.9846,
+        "outline_score": 0.9901,
+        "shape_score": 0.9718
+      },
+      {
+        "width": 25,
+        "height": 25,
+        "score": 0.971,
+        "outline_score": 1.0,
+        "shape_score": 0.9035
+      },
+      {
+        "width": 36,
+        "height": 36,
+        "score": 0.9701,
+        "outline_score": 0.9909,
+        "shape_score": 0.9216
+      },
+      {
+        "width": 29,
+        "height": 29,
+        "score": 0.969,
+        "outline_score": 1.0,
+        "shape_score": 0.8968
+      },
+      {
+        "width": 31,
+        "height": 31,
+        "score": 0.9688,
+        "outline_score": 1.0,
+        "shape_score": 0.896
+      },
+      {
+        "width": 19,
+        "height": 19,
+        "score": 0.9668,
+        "outline_score": 1.0,
+        "shape_score": 0.8894
+      },
+      {
+        "width": 32,
+        "height": 32,
+        "score": 0.9667,
+        "outline_score": 0.9886,
+        "shape_score": 0.9158
+      },
+      {
+        "width": 33,
+        "height": 33,
+        "score": 0.9661,
+        "outline_score": 1.0,
+        "shape_score": 0.887
+      }
+    ]
+  },
+  "native_size": [
+    34,
+    34
+  ]
+}
