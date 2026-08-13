@@ -228,7 +228,9 @@ stripe listen --forward-to http://localhost:8788/api/stripe/webhook
 
 Copy the printed `whsec_...` value into `STRIPE_WEBHOOK_SECRET` in `.dev.vars`, then restart `npm run pages:dev`.
 
-For production, add a Stripe webhook endpoint at:
+Do not register the production URL as a Stripe test-mode webhook endpoint. Stripe uses a different signing secret for each mode, and the production handler is connected to the production D1 database. For persistent remote test webhooks, use an isolated staging deployment with its own test D1 database and test signing secret.
+
+For production, add a live-mode Stripe webhook endpoint at:
 
 ```text
 https://ews.kylemcdonald.net/api/stripe/webhook

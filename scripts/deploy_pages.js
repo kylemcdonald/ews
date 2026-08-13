@@ -73,7 +73,6 @@ async function main() {
   run("npm", ["run", "verify:dashboard-urls"]);
 
   const deployArgs = [
-    "wrangler",
     "pages",
     "deploy",
     "client/dist",
@@ -87,7 +86,7 @@ async function main() {
     deployArgs.push("--commit-hash", commitHash);
   }
 
-  run("npx", deployArgs);
+  run("wrangler", deployArgs);
   run("npm", ["run", "smoke:live", "--", publicUrl]);
 }
 

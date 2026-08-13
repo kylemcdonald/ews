@@ -2,19 +2,13 @@ import {
   createManualSubscriber,
   hydrateSubscriberContacts,
 } from "../../_lib/db.js";
-import { createAccountManagementLink } from "../../_lib/customer-portal.js";
+import { createAccountManagementPath } from "../../_lib/customer-portal.js";
 import { handleError, HttpError, jsonResponse, getRequestIp, getRequestUserAgent, readJsonRequest } from "../../_lib/http.js";
 import { sendSignupConfirmationToSubscriber } from "../../_lib/notifications.js";
 
-function getNotificationBaseUrl(env) {
-  return String(env.EWS_NOTIFICATION_URL || "https://aews.cc/")
-    .trim()
-    .replace(/\/+$/, "");
-}
-
 async function mapSubscriberResult(env, subscriber) {
   const hydrated = subscriber.email_cipher || subscriber.account_email_cipher ? await hydrateSubscriberContacts(env, subscriber) : subscriber;
-  const managementUrl = await createAccountManagementLink(env, hydrated, { baseUrl: getNotificationBaseUrl(env) });
+  const managementUrl = await createAccountManagementPath(env, hydrated);
   return {
     id: hydrated.id,
     status: hydrated.status,

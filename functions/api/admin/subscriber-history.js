@@ -2,12 +2,6 @@ import { getAdminSubscriberMessageHistory } from "../../_lib/db.js";
 import { handleError, HttpError, jsonResponse, readJsonRequest } from "../../_lib/http.js";
 import { sendAdminSubscriberEmailReply, sendAdminSubscriberSmsReply } from "../../_lib/notifications.js";
 
-function getNotificationBaseUrl(env) {
-  return String(env.EWS_NOTIFICATION_URL || env.APP_BASE_URL || "https://aews.cc/")
-    .trim()
-    .replace(/\/+$/, "");
-}
-
 export async function onRequestGet({ request, env }) {
   try {
     const url = new URL(request.url);
@@ -18,7 +12,6 @@ export async function onRequestGet({ request, env }) {
 
     const history = await getAdminSubscriberMessageHistory(env, subscriberId, {
       limit: url.searchParams.get("limit"),
-      managementBaseUrl: getNotificationBaseUrl(env),
     });
     return jsonResponse(
       {

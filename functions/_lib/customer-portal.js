@@ -55,13 +55,19 @@ export async function createCustomerPortalLink(env, subscriber, options = {}) {
   return url.toString();
 }
 
-export async function createAccountManagementLink(env, subscriber, options = {}) {
+export async function createAccountManagementPath(env, subscriber) {
   const token = await createAccountManagementToken(env, subscriber);
-  const url = new URL("/manage", normalizeBaseUrl(options.baseUrl) || getPublicBaseUrl(env));
-  url.searchParams.set("subscriber", subscriber.id);
-  url.searchParams.set("token", token);
+  const searchParams = new URLSearchParams({
+    subscriber: subscriber.id,
+    token,
+  });
 
-  return url.toString();
+  return `/manage?${searchParams.toString()}`;
+}
+
+export async function createAccountManagementLink(env, subscriber, options = {}) {
+  const path = await createAccountManagementPath(env, subscriber);
+  return new URL(path, normalizeBaseUrl(options.baseUrl) || getPublicBaseUrl(env)).toString();
 }
 
 export async function verifyCustomerPortalToken(env, subscriber, token) {

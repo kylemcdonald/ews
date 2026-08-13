@@ -3,12 +3,6 @@ import { getAdminSubscriberRecords, getRecentAlertDeliveries } from "../../_lib/
 import { handleError, HttpError, jsonResponse, readJsonRequest } from "../../_lib/http.js";
 import { sendAdminSingleTest } from "../../_lib/notifications.js";
 
-function getNotificationBaseUrl(env) {
-  return String(env.EWS_NOTIFICATION_URL || env.APP_BASE_URL || "https://aews.cc/")
-    .trim()
-    .replace(/\/+$/, "");
-}
-
 export async function onRequestPost({ request, env }) {
   try {
     const payload = await readJsonRequest(request);
@@ -35,7 +29,6 @@ export async function onRequestGet({ request, env }) {
         pageSize: url.searchParams.get("pageSize"),
         emailSearch: url.searchParams.get("emailSearch") || url.searchParams.get("search"),
         hasSmsReplies: url.searchParams.get("hasSmsReplies") === "1",
-        managementBaseUrl: getNotificationBaseUrl(env),
       });
       return jsonResponse(
         {

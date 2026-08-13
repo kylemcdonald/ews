@@ -1,6 +1,6 @@
 import { contactHash, decryptString, encryptString, metadataHash } from "./crypto.js";
 import { getPhoneCountry, isSupportedSmsPhone, normalizeEmail, normalizePhone } from "./contacts.js";
-import { createAccountManagementLink } from "./customer-portal.js";
+import { createAccountManagementPath } from "./customer-portal.js";
 import { HttpError } from "./http.js";
 
 export const SUBSCRIBER_STATUS = {
@@ -1806,13 +1806,13 @@ async function getSmsReplyStatsForSubscriberRows(env, rows) {
   return statsBySubscriber;
 }
 
-async function mapAdminSubscriberRow(env, row, options = {}) {
+async function mapAdminSubscriberRow(env, row) {
   const [email, accountEmail, phone] = await Promise.all([
     decryptString(env, row.email_cipher),
     decryptString(env, row.account_email_cipher),
     decryptString(env, row.phone_cipher),
   ]);
-  const managementUrl = await createAccountManagementLink(env, row, { baseUrl: options.managementBaseUrl });
+  const managementUrl = await createAccountManagementPath(env, row);
 
   return {
     id: row.id,
@@ -1969,7 +1969,6 @@ export async function getAdminSubscriberMessageHistory(env, subscriberId, option
   const subscriberResult = await mapAdminSubscriberRow(
     env,
     mergeSmsReplyStats(subscriber, smsReplyStatsBySubscriber.get(subscriber.id)),
-    options,
   );
   const emailHashes = uniqueValues([subscriber.email_hash, subscriber.account_email_hash]);
   const phoneHashes = uniqueValues([subscriber.phone_hash]);
@@ -2050,7 +2049,7 @@ export async function getAdminSubscriberMessageHistory(env, subscriberId, option
   };
 }
 
-async function getAdminSubscriberSearchRecords(env, { page, pageSize, emailSearch, hasSmsReplies, managementBaseUrl }) {
+async function getAdminSubscriberSearchRecords(env, { page, pageSize, emailSearch, hasSmsReplies }) {
   const phoneSearchDigits = normalizeAdminPhoneSearchDigits(emailSearch);
   const subscribersQuery = `
         SELECT *
@@ -2124,7 +2123,7 @@ async function getAdminSubscriberSearchRecords(env, { page, pageSize, emailSearc
 
   const subscribers = await Promise.all(
     pageRows.map((row) =>
-      mapAdminSubscriberRow(env, mergeDeliveryStats(row, deliveryStatsBySubscriber.get(row.id)), { managementBaseUrl }),
+      mapAdminSubscriberRow(env, mergeDeliveryStats(row, deliveryStatsBySubscriber.get(row.id))),
     ),
   );
 
@@ -2153,7 +2152,6 @@ export async function getAdminSubscriberRecords(env, options = {}) {
       pageSize,
       emailSearch,
       hasSmsReplies,
-      managementBaseUrl: options.managementBaseUrl,
     });
   }
 
@@ -2269,7 +2267,7 @@ export async function getAdminSubscriberRecords(env, options = {}) {
     queryRows(env, subscribersQuery, [pageSize, offset]),
   ]);
   const summary = mapSubscriberSummary(summaryRows[0]);
-  const subscribers = await Promise.all(subscriberRows.map((row) => mapAdminSubscriberRow(env, row, options)));
+  const subscribers = await Promise.all(subscriberRows.map((row) => mapAdminSubscriberRow(env, row)));
 
   return {
     subscribers,
