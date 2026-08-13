@@ -112,7 +112,10 @@ def download_heatmap(timestamp):
         return destination, True
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    request = urllib.request.Request(heatmap_url(timestamp), headers={"User-Agent": "Mozilla/5.0"})
+    request = urllib.request.Request(
+        heatmap_url(timestamp),
+        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://globe.adsbexchange.com/"},
+    )
     with urllib.request.urlopen(request, timeout=180) as response:
         destination.write_bytes(response.read())
     return destination, False

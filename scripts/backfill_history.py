@@ -156,7 +156,7 @@ def download_heatmap(date_value, index, destination, rate_limit_seconds, timeout
 
     request = urllib.request.Request(
         heatmap_url_for(date_value, index),
-        headers={"User-Agent": "Mozilla/5.0"},
+        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://globe.adsbexchange.com/"},
     )
 
     for attempt in range(1, max_retries + 1):

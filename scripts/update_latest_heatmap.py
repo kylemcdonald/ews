@@ -125,7 +125,10 @@ def download_heatmap(timestamp, destination, timeout_seconds=120):
     if destination.exists():
         return True, True
 
-    request = urllib.request.Request(heatmap_url_for(timestamp), headers={"User-Agent": "Mozilla/5.0"})
+    request = urllib.request.Request(
+        heatmap_url_for(timestamp),
+        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://globe.adsbexchange.com/"},
+    )
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             destination.write_bytes(response.read())
