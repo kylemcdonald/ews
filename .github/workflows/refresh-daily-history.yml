@@ -52,6 +52,9 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Configure production bindings
+        run: cp wrangler.production.toml wrangler.toml
+
       - name: Install dependencies
         run: |
           npm ci

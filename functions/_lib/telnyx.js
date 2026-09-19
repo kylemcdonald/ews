@@ -53,6 +53,7 @@ export function getTelnyxWebhookFailoverUrl(env) {
 async function telnyxRequest(env, method, path, body = null) {
   const init = {
     method,
+    signal: AbortSignal.timeout(20_000),
     headers: {
       authorization: `Bearer ${requireTelnyxApiKey(env)}`,
     },

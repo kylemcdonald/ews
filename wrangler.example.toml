@@ -7,3 +7,7 @@ binding = "EWS_NOTIFY_DB"
 database_name = "ews-notifications"
 database_id = "replace-with-cloudflare-d1-database-id"
 migrations_dir = "migrations"
+
+[[services]]
+binding = "EWS_ALERT_DISPATCH"
+service = "ews-alert-dispatch"

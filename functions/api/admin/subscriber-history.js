@@ -12,6 +12,7 @@ export async function onRequestGet({ request, env }) {
 
     const history = await getAdminSubscriberMessageHistory(env, subscriberId, {
       limit: url.searchParams.get("limit"),
+      markViewed: url.searchParams.get("markViewed") !== "0",
     });
     return jsonResponse(
       {

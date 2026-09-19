@@ -1,0 +1,27 @@
+name = "ews-alert-dispatch"
+main = "workers/alert-dispatch.js"
+compatibility_date = "2026-05-05"
+workers_dev = false
+
+[vars]
+EWS_ALERT_ORIGIN = "https://ews.kylemcdonald.net"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[d1_databases]]
+binding = "EWS_NOTIFY_DB"
+database_name = "ews-notifications"
+database_id = "7ca8e151-fa6f-4688-a3ac-7fd404ba70e9"
+migrations_dir = "migrations"
+
+[[queues.producers]]
+binding = "EWS_ALERT_QUEUE"
+queue = "ews-alert-batches"
+
+[[queues.consumers]]
+queue = "ews-alert-batches"
+max_batch_size = 1
+max_batch_timeout = 0
+max_retries = 5
+max_concurrency = 1

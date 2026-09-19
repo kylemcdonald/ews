@@ -1,7 +1,7 @@
 import { anonymizeExpiredPendingSignups } from "../../_lib/db.js";
 import { handleError, jsonResponse, readJsonRequest } from "../../_lib/http.js";
 import { requireInternalAuth } from "../../_lib/internal-auth.js";
-import { maybeSendLevel5Notifications } from "../../_lib/notifications.js";
+import { maybeSendLevel5Notifications } from "../../_lib/alert-jobs.js";
 
 export async function onRequestPost({ request, env }) {
   try {

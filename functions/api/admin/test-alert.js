@@ -25,6 +25,9 @@ export async function onRequestGet({ request, env }) {
     const url = new URL(request.url);
     if (url.searchParams.get("view") === "subscribers") {
       const subscriberRecords = await getAdminSubscriberRecords(env, {
+        includeStats: url.searchParams.get("includeStats") !== "0",
+        exactSearch: url.searchParams.get("exactSearch") === "1",
+        searchCursor: url.searchParams.get("searchCursor"),
         page: url.searchParams.get("page"),
         pageSize: url.searchParams.get("pageSize"),
         emailSearch: url.searchParams.get("emailSearch") || url.searchParams.get("search"),

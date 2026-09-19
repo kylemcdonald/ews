@@ -43,7 +43,7 @@ const BACKGROUND_URL = '/backgrounds/soft-cartoon-tile-15.webp'
 const BACKGROUND_PRELOAD_LINK_ID = 'background-preload'
 const SUBSCRIBERS_PER_PAGE = 20
 const SUBSCRIPTION_GROSS_DOLLARS = 5
-const MESSAGE_HISTORY_POLL_INTERVAL_MS = 15_000
+const MESSAGE_HISTORY_POLL_INTERVAL_MS = 60_000
 const ADMIN_REPLY_MAX_LENGTH = 1600
 const GSM7_SINGLE_SEGMENT_LIMIT = 160
 const GSM7_CONCATENATED_SEGMENT_LIMIT = 153
@@ -3599,7 +3599,7 @@ function formatMessageDeliveryStatus(message) {
 }
 
 function isMessageDeliveryError(message) {
-  return Boolean(message?.error || ['failed', 'undelivered'].includes(String(message?.status || '').toLowerCase()))
+  return Boolean(message?.error || ['failed', 'undelivered', 'unknown', 'unconfirmed'].includes(String(message?.status || '').toLowerCase()))
 }
 
 function getMessageDeliveryTone(message) {
@@ -4606,6 +4606,11 @@ function AdminTestAlertPage() {
   const [subscriberSearchInput, setSubscriberSearchInput] = useState('')
   const [subscriberEmailSearch, setSubscriberEmailSearch] = useState('')
   const [subscriberRepliesOnly, setSubscriberRepliesOnly] = useState(false)
+  const [subscriberExactSearch, setSubscriberExactSearch] = useState(true)
+  const subscriberStatsCache = useRef(new Map())
+  const subscriberSearchCache = useRef(null)
+  const subscriberRequest = useRef(null)
+  const historyRequestInFlight = useRef(false)
   const [manualAccountEmail, setManualAccountEmail] = useState('')
   const [manualAlertEmail, setManualAlertEmail] = useState('')
   const [manualPhone, setManualPhone] = useState('')
@@ -4644,37 +4649,84 @@ function AdminTestAlertPage() {
     })
     if (normalizedEmailSearch) {
       params.set('emailSearch', normalizedEmailSearch)
+      params.set('exactSearch', subscriberExactSearch ? '1' : '0')
     }
+    const cachedStats = !normalizedEmailSearch && subscriberStatsCache.current.get(repliesOnly)
+    if (cachedStats && Date.now() - cachedStats.time < 60_000) params.set('includeStats', '0')
     if (repliesOnly) {
       params.set('hasSmsReplies', '1')
     }
+    subscriberRequest.current?.abort()
+    const controller = new AbortController()
+    subscriberRequest.current = controller
     setSubscriberLoading(true)
     setSubscriberStatus(null)
     try {
-      const response = await fetch(`/api/admin/test-alert?${params.toString()}`, { cache: 'no-store' })
-      const payload = await response.json().catch(() => ({}))
-      if (!response.ok || !Array.isArray(payload.subscribers)) {
+      let payload
+      const partialSearch = normalizedEmailSearch && !subscriberExactSearch
+      const cacheKey = `${normalizedEmailSearch.toLowerCase()}:${repliesOnly}`
+      const cachedSearch = subscriberSearchCache.current
+      let matches = partialSearch && cachedSearch?.key === cacheKey && Date.now() - cachedSearch.time < 60_000
+        ? cachedSearch.rows : null
+      if (!matches) {
+        const response = await fetch(`/api/admin/test-alert?${params.toString()}`, { cache: 'no-store', signal: controller.signal })
+        payload = await response.json().catch(() => ({}))
+        if (!response.ok || !Array.isArray(payload.subscribers)) throw new Error(payload.error || 'Could not load subscriber database.')
+        if (partialSearch) {
+          matches = [...(payload.subscribers || [])]
+          let cursor = payload.nextSearchCursor
+          while (cursor) {
+            setSubscriberStatus({ tone: 'info', message: `Searching contacts… ${matches.length} matches so far.` })
+            params.set('searchCursor', cursor)
+            const response = await fetch(`/api/admin/test-alert?${params.toString()}`, { cache: 'no-store', signal: controller.signal })
+            const chunk = await response.json().catch(() => ({}))
+            if (!response.ok || !Array.isArray(chunk.subscribers)) throw new Error(chunk.error || 'Contact search failed.')
+            matches.push(...chunk.subscribers)
+            cursor = chunk.nextSearchCursor
+          }
+          const rank = { active: 0, pending_checkout: 1, past_due: 2 }
+          matches.sort((a, b) => repliesOnly
+            ? String(b.lastSmsReplyAt || '').localeCompare(String(a.lastSmsReplyAt || '')) || a.id.localeCompare(b.id)
+            : (rank[a.status] ?? 3) - (rank[b.status] ?? 3) || String(b.updatedAt).localeCompare(String(a.updatedAt)) || a.id.localeCompare(b.id))
+          subscriberSearchCache.current = { key: cacheKey, rows: matches, time: Date.now() }
+          setSubscriberStatus(null)
+        }
+      }
+      if (partialSearch) {
+        payload = { subscribers: matches.slice((targetPage - 1) * SUBSCRIBERS_PER_PAGE, targetPage * SUBSCRIBERS_PER_PAGE),
+          summary: getSubscriberSummary(matches), dailyStats: buildSubscriberDailyStats(matches), total: matches.length,
+          page: targetPage, pageSize: SUBSCRIBERS_PER_PAGE }
+      }
+      if (!Array.isArray(payload.subscribers)) {
         throw new Error(payload.error || 'Could not load subscriber database.')
       }
       setSubscriberRecords(payload.subscribers)
-      setSubscriberSummary(normalizeSubscriberSummary(payload.summary || getSubscriberSummary(payload.subscribers)))
-      setSubscriberDailyStats(
-        payload.dailyStats ? normalizeSubscriberDailyStats(payload.dailyStats) : buildSubscriberDailyStats(payload.subscribers),
-      )
-      setSubscriberTotal(Number(payload.total || payload.summary?.total || payload.subscribers.length || 0))
+      const stats = payload.summary ? payload : cachedStats?.payload
+      if (stats) {
+        setSubscriberSummary(normalizeSubscriberSummary(stats.summary))
+        setSubscriberDailyStats(normalizeSubscriberDailyStats(stats.dailyStats || []))
+        setSubscriberTotal(Number(stats.total || 0))
+        if (!normalizedEmailSearch && payload.summary) {
+          subscriberStatsCache.current.set(repliesOnly, { time: Date.now(), payload: {
+            summary: payload.summary, dailyStats: payload.dailyStats, total: payload.total,
+          } })
+        }
+      }
       setSubscriberPageSize(Number(payload.pageSize || SUBSCRIBERS_PER_PAGE))
       setSubscriberPage(Number(payload.page || targetPage))
     } catch (error) {
+      if (error.name === 'AbortError') return
       setSubscriberStatus({
         tone: 'error',
         message: error.message,
       })
     } finally {
-      setSubscriberLoading(false)
+      if (subscriberRequest.current === controller) setSubscriberLoading(false)
     }
-  }, [subscriberEmailSearch, subscriberRepliesOnly])
+  }, [subscriberEmailSearch, subscriberRepliesOnly, subscriberExactSearch])
 
   const loadMessageHistory = useCallback(async ({ silent = false } = {}) => {
+    if (historyRequestInFlight.current || (silent && document.hidden)) return
     const subscriberId = String(historySubscriberId || '').trim()
     if (!subscriberId) {
       setHistoryStatus({ tone: 'error', message: 'Missing subscriber ID.' })
@@ -4682,9 +4734,11 @@ function AdminTestAlertPage() {
       return
     }
 
+    historyRequestInFlight.current = true
     const params = new URLSearchParams({
       subscriber: subscriberId,
       limit: '250',
+      markViewed: silent ? '0' : '1',
     })
     if (!silent) {
       setHistoryLoading(true)
@@ -4706,6 +4760,7 @@ function AdminTestAlertPage() {
       }
       setHistoryStatus({ tone: 'error', message: error.message })
     } finally {
+      historyRequestInFlight.current = false
       if (!silent) {
         setHistoryLoading(false)
       }
@@ -5546,7 +5601,7 @@ function AdminTestAlertPage() {
                 <button
                   className="signup-submit"
                   type="button"
-                  onClick={() => loadSubscriberRecords(normalizedSubscriberPage)}
+                  onClick={() => { subscriberStatsCache.current.clear(); subscriberSearchCache.current = null; loadSubscriberRecords(normalizedSubscriberPage) }}
                   disabled={subscriberLoading}
                 >
                   {subscriberLoading ? 'Loading...' : 'Refresh'}
@@ -5565,7 +5620,7 @@ function AdminTestAlertPage() {
                   <input
                     type="search"
                     value={subscriberSearchInput}
-                    placeholder="exact or partial email/phone"
+                    placeholder={subscriberExactSearch ? "full email or phone number" : "partial email or phone"}
                     autoComplete="off"
                     onChange={(event) => setSubscriberSearchInput(event.target.value)}
                   />
@@ -5578,6 +5633,11 @@ function AdminTestAlertPage() {
                     Clear
                   </button>
                 ) : null}
+                <label className="signup-consent subscriber-filter-toggle">
+                  <input type="checkbox" checked={subscriberExactSearch} disabled={subscriberLoading}
+                    onChange={(event) => { setSubscriberExactSearch(event.target.checked); setSubscriberPage(1) }} />
+                  <span>Exact match</span>
+                </label>
                 <label className="signup-consent subscriber-filter-toggle">
                   <input
                     type="checkbox"

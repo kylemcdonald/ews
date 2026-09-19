@@ -1230,50 +1230,6 @@ export async function setMetaValue(env, key, value) {
     .run();
 }
 
-async function recalculateAlertDeliveryCounts(env, alertId) {
-  const row = await getDb(env)
-    .prepare(
-      `
-        SELECT
-          SUM(CASE WHEN channel = 'email' AND status IN ('sent', 'delivered') THEN 1 ELSE 0 END) AS email_sent_count,
-          SUM(CASE WHEN channel = 'sms' AND status IN ('sent', 'delivered') THEN 1 ELSE 0 END) AS sms_sent_count,
-          SUM(CASE WHEN status IN ('failed', 'undelivered') THEN 1 ELSE 0 END) AS error_count
-        FROM notification_deliveries
-        WHERE alert_id = ?
-      `,
-    )
-    .bind(alertId)
-    .first();
-
-  const errorCount = Number(row?.error_count || 0);
-  await getDb(env)
-    .prepare(
-      `
-        UPDATE notification_alerts
-        SET
-          email_sent_count = ?,
-          sms_sent_count = ?,
-          error_count = ?,
-          status = CASE
-            WHEN ? > 0 THEN 'completed_with_errors'
-            WHEN status = 'created' THEN 'sent'
-            ELSE status
-          END,
-          updated_at = ?
-        WHERE id = ?
-      `,
-    )
-    .bind(
-      Number(row?.email_sent_count || 0),
-      Number(row?.sms_sent_count || 0),
-      errorCount,
-      errorCount,
-      nowIso(),
-      alertId,
-    )
-    .run();
-}
-
 export async function createAlertRecord(env, { kind, source, level, slotKey, messageText, status = "created" }) {
   const id = crypto.randomUUID();
   await getDb(env)
@@ -1299,31 +1255,23 @@ export async function createAlertRecord(env, { kind, source, level, slotKey, mes
 }
 
 export async function updateAlertRecord(env, alertId, summary) {
-  await getDb(env)
-    .prepare(
-      `
-        UPDATE notification_alerts
-        SET
-          status = ?,
-          subscriber_count = ?,
-          email_sent_count = ?,
-          sms_sent_count = ?,
-          error_count = ?,
-          sent_at = ?,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `,
-    )
-    .bind(
-      summary.status,
-      summary.subscriberCount || 0,
-      summary.emailSentCount || 0,
-      summary.smsSentCount || 0,
-      summary.errorCount || 0,
-      nowIso(),
-      alertId,
-    )
-    .run();
+  // One atomic final recount; callbacks arriving later apply only count deltas.
+  await getDb(env).prepare(`
+    UPDATE notification_alerts SET
+      status = CASE WHEN EXISTS (SELECT 1 FROM notification_deliveries
+        WHERE alert_id = ? AND status IN ('failed','undelivered','unknown','unconfirmed'))
+        THEN 'completed_with_errors' ELSE ? END,
+      subscriber_count = ?,
+      email_sent_count = (SELECT COUNT(*) FROM notification_deliveries
+        WHERE alert_id = ? AND channel = 'email' AND status IN ('sent','delivered')),
+      sms_sent_count = (SELECT COUNT(*) FROM notification_deliveries
+        WHERE alert_id = ? AND channel = 'sms' AND status IN ('sent','delivered')),
+      error_count = (SELECT COUNT(*) FROM notification_deliveries
+        WHERE alert_id = ? AND status IN ('failed','undelivered','unknown','unconfirmed')),
+      sent_at = ?, updated_at = ?
+    WHERE id = ?
+  `).bind(alertId, summary.status, summary.subscriberCount || 0,
+    alertId, alertId, alertId, nowIso(), nowIso(), alertId).run();
 }
 
 export async function recordDelivery(env, delivery) {
@@ -1957,10 +1905,13 @@ export async function getAdminSubscriberMessageHistory(env, subscriberId, option
       `
         UPDATE notification_signups
         SET admin_history_viewed_at = ?
-        WHERE id = ?
+        WHERE id = ? AND (? = 1 OR admin_history_viewed_at IS NULL OR admin_history_viewed_at < (
+          SELECT MAX(received_at) FROM notification_inbound_messages
+          WHERE subscriber_id = ? OR phone_hash = ?
+        ))
       `,
     )
-    .bind(historyViewedAt, subscriber.id)
+    .bind(historyViewedAt, subscriber.id, options.markViewed ? 1 : 0, subscriber.id, subscriber.phone_hash)
     .run();
   subscriber.admin_history_viewed_at = historyViewedAt;
 
@@ -2049,25 +2000,38 @@ export async function getAdminSubscriberMessageHistory(env, subscriberId, option
   };
 }
 
-async function getAdminSubscriberSearchRecords(env, { page, pageSize, emailSearch, hasSmsReplies }) {
+async function getAdminSubscriberSearchRecords(env, { page, pageSize, emailSearch, hasSmsReplies, exactSearch, searchCursor = "" }) {
   const phoneSearchDigits = normalizeAdminPhoneSearchDigits(emailSearch);
-  const subscribersQuery = `
-        SELECT *
-        FROM notification_signups
-        ORDER BY
-          CASE status
-            WHEN 'active' THEN 0
-            WHEN 'pending_checkout' THEN 1
-            WHEN 'past_due' THEN 2
-            ELSE 3
-          END,
-          updated_at DESC,
-          id ASC
-      `;
-  const rows = await queryRows(env, subscribersQuery);
+  let searchWhere = 'email_cipher IS NOT NULL OR account_email_cipher IS NOT NULL OR phone_cipher IS NOT NULL';
+  const searchParams = [];
+  if (exactSearch) {
+    const clauses = [];
+    try {
+      const email = normalizeEmail(emailSearch);
+      if (email) {
+        const hash = await contactHash(env, 'email', email);
+        clauses.push('email_hash = ?', 'account_email_hash = ?');
+        searchParams.push(hash, hash);
+      }
+    } catch { /* It may be a phone number. */ }
+    try {
+      const phone = normalizePhone(emailSearch);
+      if (phone) {
+        clauses.push('phone_hash = ?');
+        searchParams.push(await contactHash(env, 'phone', phone));
+      }
+    } catch { /* An invalid exact contact returns no results. */ }
+    searchWhere = clauses.length ? clauses.join(' OR ') : '0';
+  }
+  // Sorting happens once below, after matching. Redacted contacts cannot match.
+  const rows = await queryRows(env, exactSearch
+    ? `SELECT * FROM notification_signups WHERE ${searchWhere}`
+    : `SELECT * FROM notification_signups WHERE (${searchWhere}) AND id > ? ORDER BY id LIMIT 25`,
+    exactSearch ? searchParams : [searchCursor]);
   const matchedRows = [];
 
   for (const row of rows) {
+    if (exactSearch) { matchedRows.push(row); continue; }
     const [email, accountEmail, phone] = await Promise.all([
       decryptString(env, row.email_cipher),
       decryptString(env, row.account_email_cipher),
@@ -2095,7 +2059,7 @@ async function getAdminSubscriberSearchRecords(env, { page, pageSize, emailSearc
     filteredRows.sort(compareSubscriberRowsBySmsReplyRecency);
   }
   const offset = (page - 1) * pageSize;
-  const pageRows = filteredRows.slice(offset, offset + pageSize);
+  const pageRows = exactSearch ? filteredRows.slice(offset, offset + pageSize) : filteredRows;
   const deliveryStatsBySubscriber = new Map();
 
   if (pageRows.length) {
@@ -2108,7 +2072,7 @@ async function getAdminSubscriberSearchRecords(env, { page, pageSize, emailSearc
           COUNT(id) AS delivery_count,
           SUM(CASE WHEN channel = 'email' THEN 1 ELSE 0 END) AS email_delivery_count,
           SUM(CASE WHEN channel = 'sms' THEN 1 ELSE 0 END) AS sms_delivery_count,
-          SUM(CASE WHEN status IN ('failed', 'undelivered') THEN 1 ELSE 0 END) AS delivery_error_count,
+          SUM(CASE WHEN status IN ('failed', 'undelivered', 'unknown', 'unconfirmed') THEN 1 ELSE 0 END) AS delivery_error_count,
           MAX(COALESCE(updated_at, created_at)) AS last_delivery_at
         FROM notification_deliveries
         WHERE subscriber_id IN (${placeholders})
@@ -2136,6 +2100,7 @@ async function getAdminSubscriberSearchRecords(env, { page, pageSize, emailSearc
     total: filteredRows.length,
     emailSearch,
     hasSmsReplies,
+    ...(exactSearch ? {} : { nextSearchCursor: rows.length === 25 ? rows.at(-1).id : null }),
   };
 }
 
@@ -2152,6 +2117,8 @@ export async function getAdminSubscriberRecords(env, options = {}) {
       pageSize,
       emailSearch,
       hasSmsReplies,
+      exactSearch: Boolean(options.exactSearch),
+      searchCursor: String(options.searchCursor || ""),
     });
   }
 
@@ -2240,7 +2207,7 @@ export async function getAdminSubscriberRecords(env, options = {}) {
           COUNT(d.id) AS delivery_count,
           SUM(CASE WHEN d.channel = 'email' THEN 1 ELSE 0 END) AS email_delivery_count,
           SUM(CASE WHEN d.channel = 'sms' THEN 1 ELSE 0 END) AS sms_delivery_count,
-          SUM(CASE WHEN d.status IN ('failed', 'undelivered') THEN 1 ELSE 0 END) AS delivery_error_count,
+          SUM(CASE WHEN d.status IN ('failed', 'undelivered', 'unknown', 'unconfirmed') THEN 1 ELSE 0 END) AS delivery_error_count,
           MAX(COALESCE(d.updated_at, d.created_at)) AS last_delivery_at,
           (
             SELECT COUNT(im.id)
@@ -2262,8 +2229,8 @@ export async function getAdminSubscriberRecords(env, options = {}) {
       `;
 
   const [summaryRows, dailyStatsRows, subscriberRows] = await Promise.all([
-    queryRows(env, summaryQuery),
-    queryRows(env, dailyStatsQuery),
+    options.includeStats === false ? [] : queryRows(env, summaryQuery),
+    options.includeStats === false ? [] : queryRows(env, dailyStatsQuery),
     queryRows(env, subscribersQuery, [pageSize, offset]),
   ]);
   const summary = mapSubscriberSummary(summaryRows[0]);
@@ -2271,11 +2238,9 @@ export async function getAdminSubscriberRecords(env, options = {}) {
 
   return {
     subscribers,
-    summary,
-    dailyStats: dailyStatsRows.map(mapSubscriberDailyStats),
+    ...(options.includeStats === false ? {} : { summary, dailyStats: dailyStatsRows.map(mapSubscriberDailyStats), total: summary.total }),
     page,
     pageSize,
-    total: summary.total,
     hasSmsReplies,
   };
 }
@@ -2310,58 +2275,30 @@ export async function updateDeliveryByProviderMessageId(
   }
 
   const db = getDb(env);
-  const existing = await db
-    .prepare(
-      `
-        SELECT
-          d.id,
-          d.alert_id,
-          d.subscriber_id,
-          d.channel,
-          a.kind
-        FROM notification_deliveries d
-        JOIN notification_alerts a ON a.id = d.alert_id
-        WHERE d.provider_message_id = ?
-        LIMIT 1
-      `,
-    )
-    .bind(providerMessageId)
-    .first();
-  if (!existing) {
-    return null;
-  }
+  carrier = carrier ? String(carrier).slice(0, 500) : null;
+  lineType = lineType ? String(lineType).slice(0, 100) : null;
+  error = error ? String(error).slice(0, 1000) : null;
+  const updated = await db.prepare(`
+    UPDATE notification_deliveries SET
+      status = ?, provider_status = ?,
+      carrier = COALESCE(?, carrier), line_type = COALESCE(?, line_type),
+      error = ?, updated_at = ?
+    WHERE id = (SELECT id FROM notification_deliveries WHERE provider_message_id = ? LIMIT 1)
+      AND NOT (status IN ('delivered','failed','undelivered','unconfirmed') AND ? = 'sent')
+      AND NOT (status = 'delivered' AND ? != 'delivered')
+      AND (status IS NOT ? OR provider_status IS NOT ? OR error IS NOT ?
+        OR (? IS NOT NULL AND carrier IS NOT ?) OR (? IS NOT NULL AND line_type IS NOT ?))
+    RETURNING alert_id, subscriber_id, channel,
+      (SELECT kind FROM notification_alerts WHERE notification_alerts.id = notification_deliveries.alert_id) AS kind
+  `).bind(status, providerStatus, carrier, lineType, error, nowIso(), providerMessageId,
+    status, status, status, providerStatus, error, carrier, carrier, lineType, lineType).first();
+  if (!updated) return null;
 
-  await db
-    .prepare(
-      `
-        UPDATE notification_deliveries
-        SET
-          status = ?,
-          provider_status = ?,
-          carrier = COALESCE(?, carrier),
-          line_type = COALESCE(?, line_type),
-          error = ?,
-          updated_at = ?
-        WHERE id = ?
-      `,
-    )
-    .bind(
-      status,
-      providerStatus,
-      carrier ? String(carrier).slice(0, 500) : null,
-      lineType ? String(lineType).slice(0, 100) : null,
-      error ? String(error).slice(0, 1000) : null,
-      nowIso(),
-      existing.id,
-    )
-    .run();
-
-  await recalculateAlertDeliveryCounts(env, existing.alert_id);
   return {
-    alertId: existing.alert_id,
-    subscriberId: existing.subscriber_id,
-    channel: existing.channel,
-    kind: existing.kind,
+    alertId: updated.alert_id,
+    subscriberId: updated.subscriber_id,
+    channel: updated.channel,
+    kind: updated.kind,
   };
 }
 

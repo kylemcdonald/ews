@@ -238,7 +238,7 @@ https://ews.kylemcdonald.net/api/stripe/webhook
 
 Subscribe it to `checkout.session.completed`, `checkout.session.expired`, `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`.
 
-The scheduled refresh workflows call `/api/internal/level5-alert` after dashboard export. Add a GitHub repository secret named `EWS_INTERNAL_ALERT_TOKEN` with the same value as the Cloudflare Pages `INTERNAL_ALERT_TOKEN` secret. SMS/email alerts send only for emergency level 5 and are globally cooled down for 24 hours.
+The scheduled refresh workflows call `/api/internal/level5-alert` after dashboard export. Add a GitHub repository secret named `EWS_INTERNAL_ALERT_TOKEN` with the same value as the Cloudflare Pages `INTERNAL_ALERT_TOKEN` secret. SMS/email alerts start only for emergency level 5, run as resumable batches, and have a 24-hour cooldown after completion. See [free-tier delivery and deployment](docs/free-tier-notifications.md) for queue setup, capacity tests, and recovery behavior.
 
 For Telnyx SMS, configure the messaging profile's webhook URL to:
 

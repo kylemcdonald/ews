@@ -2,6 +2,10 @@ import { arrayBufferToHex, base64ToBytes, bytesToBase64, utf8Bytes, utf8String }
 import { HttpError } from "./http.js";
 
 const ENCRYPTION_PREFIX = "v1";
+// Keep only the current imported key of each type; avoid repeated imports while
+// decrypting a batch, without mixing keys across environments or rotations.
+let hmacKeyCache;
+let aesKeyCache;
 
 function requireSecret(env, key) {
   const value = String(env[key] || "").trim();
@@ -13,22 +17,28 @@ function requireSecret(env, key) {
 }
 
 async function importHmacKey(secret) {
-  return crypto.subtle.importKey(
+  if (hmacKeyCache?.secret === secret) return hmacKeyCache.key;
+  const key = crypto.subtle.importKey(
     "raw",
     utf8Bytes(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],
   );
+  hmacKeyCache = { secret, key };
+  return key;
 }
 
 async function importAesKey(secret) {
+  if (aesKeyCache?.secret === secret) return aesKeyCache.key;
   const keyBytes = base64ToBytes(secret);
   if (keyBytes.length !== 32) {
     throw new HttpError(500, "NOTIFICATION_ENCRYPTION_KEY must be a base64-encoded 32-byte key.");
   }
 
-  return crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+  const key = crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+  aesKeyCache = { secret, key };
+  return key;
 }
 
 export async function hmacHex(secret, value) {

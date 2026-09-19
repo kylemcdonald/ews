@@ -12,8 +12,8 @@
     "dev:server": "node --watch server/index.js",
     "dev:client": "npm run dev --workspace client",
     "pages:dev": "npm run build --workspace client -- --mode development && npx wrangler pages dev client/dist",
-    "d1:migrate:local": "npx wrangler d1 migrations apply ews-notifications --local",
-    "d1:migrate:remote": "npx wrangler d1 migrations apply ews-notifications --remote",
+    "d1:migrate:local": "wrangler d1 migrations apply ews-notifications --local",
+    "d1:migrate:remote": "wrangler d1 migrations apply ews-notifications --remote",
     "backfill:telnyx-inbound": "node scripts/backfill_telnyx_inbound_sms.js",
     "build": "npm run build --workspace client && npm run verify:dashboard-urls",
     "preview": "npm run preview --workspace client",
@@ -41,7 +41,9 @@
     "export:untracked": "node scripts/export_dashboard_snapshot.js --db data/ews-untracked.sqlite --endpoint untracked --cohort non_icao_untracked",
     "rss:update": "node scripts/update_rss_feed.js",
     "telegram:alert": "node scripts/send_telegram_alert.js",
-    "lint": "npm run lint --workspace client"
+    "lint": "npm run lint --workspace client",
+    "test:notifications": "node --test tests/notification-free-tier.test.cjs",
+    "test:admin": "node tests/admin-free-tier.browser.cjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
@@ -51,6 +53,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "esbuild": "^0.27.4",
+    "miniflare": "^4.20260722.0"
   }
 }

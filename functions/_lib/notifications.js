@@ -2,15 +2,12 @@ import {
   claimRenewalReminder,
   createAlertRecord,
   getRenewalReminderCandidates,
-  getActiveSubscribers,
-  getMetaValue,
   getSubscriberById,
   hydrateSubscriberContacts,
   markRenewalReminderFailed,
   markRenewalReminderSent,
   recordSubscriberWelcomeSent,
   recordDelivery,
-  setMetaValue,
   updateAlertRecord,
   updateSubscriberFromSubscription,
 } from "./db.js";
@@ -21,11 +18,7 @@ import { HttpError } from "./http.js";
 import { sendTelnyxMessage } from "./telnyx.js";
 import { createStripeInvoicePreview, retrieveStripeSubscription } from "./stripe.js";
 
-const LEVEL5_COOLDOWN_META_KEY = "level5_notification_last_sent_at";
 const DEFAULT_NOTIFICATION_URL = "https://aews.cc/";
-const LEVEL5_COOLDOWN_MS = 24 * 60 * 60 * 1000;
-const DEFAULT_LEVEL5_NOTIFICATION_CONCURRENCY = 8;
-const DEFAULT_LEVEL5_SMS_MIN_INTERVAL_MS = 250;
 const DEFAULT_RENEWAL_REMINDER_DAYS_BEFORE = 30;
 const DEFAULT_RENEWAL_REMINDER_BATCH_LIMIT = 100;
 const DEFAULT_RENEWAL_REMINDER_CONCURRENCY = 4;
@@ -119,49 +112,6 @@ function getPositiveIntegerEnv(env, key, fallback, { min = 1, max = Number.POSIT
   return Math.min(value, max);
 }
 
-function getLevel5NotificationConcurrency(env) {
-  return getPositiveIntegerEnv(env, "LEVEL5_NOTIFICATION_CONCURRENCY", DEFAULT_LEVEL5_NOTIFICATION_CONCURRENCY, {
-    min: 1,
-    max: 25,
-  });
-}
-
-function getLevel5SmsMinIntervalMs(env) {
-  return getPositiveIntegerEnv(env, "LEVEL5_SMS_MIN_INTERVAL_MS", DEFAULT_LEVEL5_SMS_MIN_INTERVAL_MS, {
-    min: 0,
-    max: 60_000,
-  });
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function createPacer(intervalMs) {
-  if (!intervalMs) {
-    return {
-      wait: async () => {},
-    };
-  }
-
-  let nextAvailableAt = 0;
-  let chain = Promise.resolve();
-  return {
-    wait() {
-      const turn = chain.then(async () => {
-        const now = Date.now();
-        const waitMs = Math.max(0, nextAvailableAt - now);
-        nextAvailableAt = Math.max(now, nextAvailableAt) + intervalMs;
-        if (waitMs > 0) {
-          await sleep(waitMs);
-        }
-      });
-      chain = turn.catch(() => {});
-      return turn;
-    },
-  };
-}
-
 async function mapWithConcurrency(items, concurrency, worker) {
   const results = new Array(items.length);
   let nextIndex = 0;
@@ -176,11 +126,6 @@ async function mapWithConcurrency(items, concurrency, worker) {
     }),
   );
   return results;
-}
-
-async function appendCustomerPortalLink(env, subscriber, messageText) {
-  const portalUrl = await createAccountManagementLink(env, subscriber, { baseUrl: getNotificationBaseUrl(env) });
-  return `${messageText}\n\nManage your notification settings: ${portalUrl}`;
 }
 
 function escapeHtml(value) {
@@ -213,7 +158,7 @@ function countSummary(summary, key, value = 1) {
   summary[key] = Number(summary[key] || 0) + value;
 }
 
-async function sendEmail(env, { to, subject, text, html = null }) {
+export async function sendEmail(env, { to, subject, text, html = null }) {
   const apiKey = String(env.SENDGRID_API_KEY || "").trim();
   const fromEmail = String(env.SENDGRID_FROM_EMAIL || "").trim();
   if (!apiKey || !fromEmail) {
@@ -226,6 +171,7 @@ async function sendEmail(env, { to, subject, text, html = null }) {
       authorization: `Bearer ${apiKey}`,
       "content-type": "application/json",
     },
+    signal: AbortSignal.timeout(20_000),
     body: JSON.stringify({
       personalizations: [
         {
@@ -256,7 +202,7 @@ async function sendEmail(env, { to, subject, text, html = null }) {
 
   const responseText = await response.text();
   if (!response.ok) {
-    throw new Error(responseText || `SendGrid request failed with ${response.status}`);
+    throw new HttpError(response.status, responseText || `SendGrid request failed with ${response.status}`);
   }
 
   return {
@@ -333,7 +279,7 @@ function formatLevel5AsOf(value) {
   return date.toISOString().replace(".000Z", "Z");
 }
 
-function getLevel5EmailContent(env, snapshot, subscriber, managementUrl) {
+export function getLevel5EmailContent(env, snapshot, subscriber, managementUrl) {
   const metrics = getEmergencyMetrics(snapshot);
   const asOf = formatLevel5AsOf(metrics.asOf);
   const alertUrl = getAlertUrl(env);
@@ -522,115 +468,6 @@ async function recordDeliveryPreparationFailure(env, { alertId, subscriberId, ch
     status: "failed",
     error: error.message,
   });
-}
-
-async function sendAlertToSubscribers(
-  env,
-  {
-    alertId,
-    subscribers,
-    messageText,
-    smsMessageText = messageText,
-    subject,
-    includeCustomerPortalLinks = false,
-    emailContentFactory = null,
-    concurrency = 1,
-    smsMinIntervalMs = 0,
-  },
-) {
-  const summary = {
-    subscriberCount: subscribers.length,
-    emailSentCount: 0,
-    smsSentCount: 0,
-    errorCount: 0,
-    emailEligibleCount: 0,
-    smsEligibleCount: 0,
-    smsMinIntervalMs,
-    concurrency,
-  };
-  const smsPacer = createPacer(smsMinIntervalMs);
-
-  const results = await mapWithConcurrency(subscribers, concurrency, async (subscriber) => {
-    const subscriberSummary = {
-      emailEligibleCount: 0,
-      smsEligibleCount: 0,
-      emailSentCount: 0,
-      smsSentCount: 0,
-      errorCount: 0,
-    };
-    const hydrated = await hydrateSubscriberContacts(env, subscriber);
-    if (hydrated.wantsEmail && hydrated.email) {
-      let emailText = messageText;
-      let emailHtml = null;
-      try {
-        if (emailContentFactory) {
-          const managementUrl = await createAccountManagementLink(env, hydrated, { baseUrl: getNotificationBaseUrl(env) });
-          const content = await emailContentFactory(hydrated, managementUrl);
-          emailText = content.text;
-          emailHtml = content.html || null;
-        } else if (includeCustomerPortalLinks) {
-          emailText = await appendCustomerPortalLink(env, hydrated, messageText);
-        }
-      } catch (error) {
-        await recordDeliveryPreparationFailure(env, {
-          alertId,
-          subscriberId: hydrated.id,
-          channel: "email",
-          destination: hydrated.email,
-          error,
-        });
-        subscriberSummary.errorCount += 1;
-        return subscriberSummary;
-      }
-
-      subscriberSummary.emailEligibleCount += 1;
-      const result = await sendDelivery(env, {
-        alertId,
-        subscriberId: hydrated.id,
-        channel: "email",
-        destination: hydrated.email,
-        text: emailText,
-        html: emailHtml,
-        subject,
-      });
-      if (result.ok) {
-        subscriberSummary.emailSentCount += 1;
-      } else {
-        subscriberSummary.errorCount += 1;
-      }
-    }
-
-    if (hydrated.wantsSms && hydrated.phone && safelyIsSupportedSmsPhone(hydrated.phone)) {
-      subscriberSummary.smsEligibleCount += 1;
-      await smsPacer.wait();
-      const result = await sendDelivery(env, {
-        alertId,
-        subscriberId: hydrated.id,
-        channel: "sms",
-        destination: hydrated.phone,
-        text: smsMessageText,
-      });
-      if (result.ok) {
-        subscriberSummary.smsSentCount += 1;
-      } else {
-        subscriberSummary.errorCount += 1;
-      }
-    }
-
-    return subscriberSummary;
-  });
-
-  for (const result of results) {
-    summary.emailEligibleCount += Number(result.emailEligibleCount || 0);
-    summary.smsEligibleCount += Number(result.smsEligibleCount || 0);
-    summary.emailSentCount += Number(result.emailSentCount || 0);
-    summary.smsSentCount += Number(result.smsSentCount || 0);
-    summary.errorCount += Number(result.errorCount || 0);
-  }
-
-  summary.status = summary.errorCount > 0 ? "completed_with_errors" : "sent";
-  await updateAlertRecord(env, alertId, summary);
-  return summary;
 }
 
 function formatSignupConfirmationChannelSentence(subscriber) {
@@ -1040,69 +877,6 @@ export async function sendRenewalReminderBatch(env, options = {}) {
   summary.status = summary.errorCount > 0 ? "completed_with_errors" : "sent";
   await updateAlertRecord(env, alertId, summary);
   return summary;
-}
-
-export async function maybeSendLevel5Notifications(env, snapshot, { source = "scheduled_refresh" } = {}) {
-  const emergencyLevel = getEmergencyLevel(snapshot);
-  const slotKey = getLatestSlotKey(snapshot);
-  if (emergencyLevel !== 5) {
-    return {
-      ok: true,
-      sent: false,
-      reason: "emergency_level_not_5",
-      emergencyLevel,
-      slotKey,
-    };
-  }
-
-  const lastSentAt = await getMetaValue(env, LEVEL5_COOLDOWN_META_KEY);
-  if (lastSentAt && Date.now() - new Date(lastSentAt).getTime() < LEVEL5_COOLDOWN_MS) {
-    return {
-      ok: true,
-      sent: false,
-      reason: "cooldown_active",
-      emergencyLevel,
-      slotKey,
-      lastSentAt,
-    };
-  }
-
-  const triggeredAt = new Date().toISOString();
-  await setMetaValue(env, LEVEL5_COOLDOWN_META_KEY, triggeredAt);
-
-  const messageText = formatEmergencyNotification(snapshot, { alertUrl: getAlertUrl(env) });
-  const smsMessageText = formatEmergencyNotification(snapshot, { includeAlertUrl: false });
-  const alertId = await createAlertRecord(env, {
-    kind: "level5",
-    source,
-    level: emergencyLevel,
-    slotKey,
-    messageText,
-  });
-  const subscribers = await getActiveSubscribers(env);
-  const smsMinIntervalMs = getLevel5SmsMinIntervalMs(env);
-  const concurrency = getLevel5NotificationConcurrency(env);
-  const summary = await sendAlertToSubscribers(env, {
-    alertId,
-    subscribers,
-    messageText,
-    smsMessageText,
-    subject: "Apocalypse EWS: emergency level 5",
-    emailContentFactory: (subscriber, managementUrl) => getLevel5EmailContent(env, snapshot, subscriber, managementUrl),
-    concurrency,
-    smsMinIntervalMs,
-  });
-
-  return {
-    ok: summary.errorCount === 0,
-    sent: true,
-    alertId,
-    emergencyLevel,
-    slotKey,
-    cooldownStartedAt: triggeredAt,
-    estimatedSmsWindowSeconds: Math.ceil((Number(summary.smsEligibleCount || 0) * smsMinIntervalMs) / 1000),
-    ...summary,
-  };
 }
 
 export async function sendAdminSingleTest(env, { email, phone }) {

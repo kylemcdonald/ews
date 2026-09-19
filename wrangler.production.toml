@@ -1,0 +1,14 @@
+# Canonical Pages bindings. Copy to wrangler.toml before deployments in CI.
+name = "apocalypse-ews"
+compatibility_date = "2026-05-05"
+pages_build_output_dir = "client/dist"
+
+[[d1_databases]]
+binding = "EWS_NOTIFY_DB"
+database_name = "ews-notifications"
+database_id = "7ca8e151-fa6f-4688-a3ac-7fd404ba70e9"
+migrations_dir = "migrations"
+
+[[services]]
+binding = "EWS_ALERT_DISPATCH"
+service = "ews-alert-dispatch"

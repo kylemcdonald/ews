@@ -9,6 +9,10 @@ on:
       - client/**
       - functions/**
       - migrations/**
+      - workers/alert-dispatch.js
+      - wrangler.alerts.toml
+      - wrangler.production.toml
+      - tests/**
       - package.json
       - package-lock.json
       - .github/workflows/deploy-pages.yml
@@ -49,32 +53,57 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify notification delivery with mocked providers
+        run: |
+          npm run lint
+          npm run test:notifications
+
+      - name: Configure production bindings
+        run: cp wrangler.production.toml wrangler.toml
+
+      - name: Install deployment CLI
+        run: npm install --global wrangler@4.114.0
+
+      - name: Migrate notification database
+        run: wrangler d1 migrations apply ews-notifications --remote
+
+      - name: Deploy alert dispatcher
+        env:
+          INTERNAL_ALERT_TOKEN: ${{ secrets.EWS_INTERNAL_ALERT_TOKEN }}
+        run: |
+          test -n "$INTERNAL_ALERT_TOKEN"
+          wrangler deploy --config wrangler.alerts.toml
+          printf '%s' "$INTERNAL_ALERT_TOKEN" | wrangler secret put INTERNAL_ALERT_TOKEN --config wrangler.alerts.toml
+
       - name: Apply public snapshot CORS
-        run: npx wrangler r2 bucket cors set "${PUBLIC_BUCKET}" --file config/r2.public.cors.json
+        run: wrangler r2 bucket cors set "${PUBLIC_BUCKET}" --file config/r2.public.cors.json
 
       - name: Restore current RSS feed
         run: |
           mkdir -p tmp
-          if npx wrangler r2 object get "${PUBLIC_BUCKET}/rss.xml" --file tmp/current-rss.xml --remote; then
+          if wrangler r2 object get "${PUBLIC_BUCKET}/rss.xml" --file tmp/current-rss.xml --remote; then
             cp tmp/current-rss.xml client/public/rss.xml
           fi
 
       - name: Build client
         run: npm run build
 
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+
+      - name: Verify admin behavior with mocked APIs
+        run: npm run test:admin
+
       - name: Publish RSS feed backup
         run: |
-          npx wrangler r2 object put "${PUBLIC_BUCKET}/rss.xml" \
+          wrangler r2 object put "${PUBLIC_BUCKET}/rss.xml" \
             --file client/dist/rss.xml \
             --remote \
             --content-type application/rss+xml \
             --cache-control "public, max-age=300"
 
       - name: Deploy to Cloudflare Pages
-        run: npx wrangler pages deploy client/dist --project-name apocalypse-ews --branch main --commit-hash "$GITHUB_SHA"
-
-      - name: Install Playwright browser
-        run: npx playwright install chromium
+        run: wrangler pages deploy client/dist --project-name apocalypse-ews --branch main --commit-hash "$GITHUB_SHA"
 
       - name: Smoke test live site
         run: npm run smoke:live
