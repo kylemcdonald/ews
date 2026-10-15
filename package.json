@@ -43,6 +43,7 @@
     "telegram:alert": "node scripts/send_telegram_alert.js",
     "lint": "npm run lint --workspace client",
     "test:notifications": "node --test tests/notification-free-tier.test.cjs",
+    "test:access": "node --test tests/access-auth.test.cjs",
     "test:admin": "node tests/admin-free-tier.browser.cjs"
   },
   "dependencies": {

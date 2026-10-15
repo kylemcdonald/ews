@@ -168,7 +168,7 @@ After replacing the secret, rerun the `Deploy Pages` workflow. The old `WRANGLER
 
 ### Paid SMS and email notifications
 
-The public Pages deployment includes Cloudflare Pages Functions for paid notification signup, Stripe webhooks, and the Cloudflare Access-protected `/admin` pages. Subscriber contact details are stored in Cloudflare D1 using encrypted email/phone fields plus keyed hashes for lookup and dedupe.
+The public Pages deployment includes Cloudflare Pages Functions for paid notification signup, Stripe webhooks, and the Cloudflare Access-protected admin pages and API (`/admin*` and `/api/admin*`). As a second layer, `functions/api/admin/_middleware.js` verifies the `Cf-Access-Jwt-Assertion` JWT on every `/api/admin/*` request (RS256 signature against the team certs, issuer, audience, expiry) and returns 401 otherwise. The team domain and Access application audience tags are fixed in `functions/_lib/access-auth.js`; if an Access application is recreated or a new one is added for another hostname, update those values or the admin API will reject requests. Local `wrangler pages dev` has no Access in front, so the admin API returns 401 there. Subscriber contact details are stored in Cloudflare D1 using encrypted email/phone fields plus keyed hashes for lookup and dedupe.
 
 Create the D1 database:
 

@@ -57,6 +57,7 @@ jobs:
         run: |
           npm run lint
           npm run test:notifications
+          npm run test:access
 
       - name: Configure production bindings
         run: cp wrangler.production.toml wrangler.toml
