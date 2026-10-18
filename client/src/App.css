@@ -2438,3 +2438,153 @@ html.emergency-color-scheme .map-control-button:hover:not(:disabled) {
     text-align: left;
   }
 }
+
+/* Full-screen exhibition displays (?display=map and ?display=activity) are not interactive. */
+html.display-mode,
+html.display-mode body {
+  height: 100%;
+  overflow: hidden;
+  cursor: none;
+}
+
+html.display-mode body {
+  margin: 0;
+}
+
+html.display-mode #root {
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+}
+
+.display-shell {
+  display: block;
+  height: 100%;
+  pointer-events: none;
+}
+
+.display-shell-map {
+  background: #fafafa;
+}
+
+.map-panel-display,
+.map-panel-display .map-frame,
+.map-panel-display .map-unavailable-state {
+  height: 100%;
+  min-height: 0;
+}
+
+.map-panel-display,
+.map-panel-display .map-frame {
+  padding: 0;
+}
+
+html.display-mode-map {
+  font-size: clamp(16px, 1.1vw, 44px);
+}
+
+.map-panel-display .map-hover-card {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+  width: 20rem;
+  padding: 0.75rem 1rem;
+}
+
+.map-panel-display .maplibre-map {
+  height: 100%;
+  min-height: 0;
+  aspect-ratio: auto;
+  background: #fafafa;
+}
+
+html.display-mode-activity {
+  font-size: clamp(16px, 1.15vw, 44px);
+}
+
+.display-shell-activity {
+  padding: clamp(16px, 3vmin, 96px);
+}
+
+.display-shell-activity > .panel {
+  height: 100%;
+}
+
+.history-panel-display {
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem 1.5rem;
+}
+
+.history-panel-display .chart-toolbar-display {
+  align-items: flex-end;
+}
+
+.history-panel-display .chart-frame,
+.history-panel-display .chart-subsection {
+  position: relative;
+  min-height: 0;
+}
+
+.history-panel-display > .chart-frame {
+  flex: 16 1 0;
+}
+
+.history-panel-display .chart-subsection {
+  display: flex;
+  flex: 9 1 0;
+  flex-direction: column;
+}
+
+.history-panel-display .chart-subsection .chart-frame {
+  flex: 1 1 0;
+}
+
+.history-panel-display .archive-chart-shell {
+  position: absolute;
+  inset: 0;
+}
+
+.history-panel-display .archive-chart-svg {
+  height: 100%;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em 1.25em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chart-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+}
+
+.chart-legend-swatch {
+  display: inline-block;
+  width: 1.6em;
+  height: 0.8em;
+}
+
+.chart-legend-swatch-line {
+  height: 0;
+  border-top: 3px solid #0000ee;
+}
+
+.chart-legend-swatch-band {
+  background: rgba(128, 128, 128, 0.18);
+}
+
+.chart-legend-swatch-holiday {
+  border: 1px solid rgba(160, 112, 0, 0.34);
+  background: rgba(255, 196, 0, 0.16);
+}
+
+html.emergency-color-scheme .chart-legend-swatch-line {
+  border-top-color: #ffff00;
+}

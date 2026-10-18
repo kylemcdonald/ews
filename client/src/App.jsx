@@ -18,6 +18,12 @@ const COHORT_CONFIGS = [
 const COHORT_LOADING_DELAY_MS = 1000
 const DASHBOARD_CACHE_BUSTER_MINUTES = 5
 const DASHBOARD_POLL_INTERVAL_MS = 5 * 60_000
+const DISPLAY_MODES = new Set(['map', 'activity'])
+const DISPLAY_MODE_POLL_INTERVAL_MS = 30 * 60_000
+const DISPLAY_MODE_RETRY_INTERVAL_MS = 60_000
+const DISPLAY_MODE_ARCHIVE_WINDOW_DAYS = 28
+const DISPLAY_MODE_HIGHLIGHT_INTERVAL_MS = 10_000
+const DISPLAY_MODE_CHART_WIDTH = 1200
 const DASHBOARD_JSON_CONTENT_TYPE_PATTERN = /\b(?:application\/json|[\w.+-]+\/[\w.+-]+\+json)\b/i
 const AIRCRAFT_MARKER_PATH = 'M0 -9 L2.2 -1.5 L8 1.2 L8 3.4 L1.8 2.1 L1.8 6.4 L4.2 8 L4.2 9 L0 7.5 L-4.2 9 L-4.2 8 L-1.8 6.4 L-1.8 2.1 L-8 3.4 L-8 1.2 L-2.2 -1.5 Z'
 const ARCHIVE_DAY_MS = 24 * 60 * 60 * 1000
@@ -876,6 +882,7 @@ function buildEmergencyLevelReferenceLines(strokeWidth) {
 
 function ArchiveSvgChart({
   data,
+  width: widthOverride = null,
   height,
   windowDays,
   yDomainMin = null,
@@ -901,7 +908,7 @@ function ArchiveSvgChart({
       return null
     }
 
-    const width = isNarrowLayout ? ARCHIVE_CHART_MOBILE_WIDTH : ARCHIVE_CHART_WIDTH
+    const width = widthOverride ?? (isNarrowLayout ? ARCHIVE_CHART_MOBILE_WIDTH : ARCHIVE_CHART_WIDTH)
     const resolvedHeight = isNarrowLayout ? Math.max(height, 230) : height
     const margin = isNarrowLayout ? ARCHIVE_CHART_MOBILE_MARGIN : ARCHIVE_CHART_MARGIN
     const tickFontSize = isNarrowLayout ? 16 : 12
@@ -1015,7 +1022,7 @@ function ArchiveSvgChart({
       yMax,
       referenceLines: referenceLines.filter((referenceLine) => Number.isFinite(referenceLine.value)),
     }
-  }, [area, bands, data, height, isNarrowLayout, lines, referenceLines, showZeroLine, windowDays, yAxisTicks, yDomainMin, yTickFormatter])
+  }, [area, bands, data, height, isNarrowLayout, lines, referenceLines, showZeroLine, widthOverride, windowDays, yAxisTicks, yDomainMin, yTickFormatter])
 
   if (!chartState) {
     return null
@@ -1889,17 +1896,50 @@ function EmergencySummary({
   )
 }
 
-function ArchiveChart({ data, signal, holidayWindows = [], cohortControls = null }) {
+function ArchiveChart({ data, signal, holidayWindows = [], cohortControls = null, cohortLabel = null, displayMode = false }) {
   const archiveData = useMemo(() => normalizeDashboardArchive(data), [data])
   return (
     <ArchiveChartPanel
       data={archiveData}
       signal={signal}
       holidayWindows={holidayWindows}
-      defaultWindowDays={3}
+      defaultWindowDays={displayMode ? DISPLAY_MODE_ARCHIVE_WINDOW_DAYS : 3}
       cohortControls={cohortControls}
+      cohortLabel={cohortLabel}
+      displayMode={displayMode}
     />
   )
+}
+
+function useElementSize() {
+  const [element, setElement] = useState(null)
+  const [size, setSize] = useState(null)
+
+  useEffect(() => {
+    if (!element) {
+      return undefined
+    }
+
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect
+      setSize((current) => (current?.width === width && current?.height === height ? current : { width, height }))
+    })
+    resizeObserver.observe(element)
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [element])
+
+  return [setElement, size]
+}
+
+function getDisplayChartHeight(size, fallbackHeight) {
+  if (!size?.width || !size?.height) {
+    return fallbackHeight
+  }
+
+  return Math.round((DISPLAY_MODE_CHART_WIDTH * size.height) / size.width)
 }
 
 function getArchivePositionSnapDays(windowDays) {
@@ -1921,7 +1961,15 @@ function snapArchiveEndDaysAgo(value, snapDays, maxEndDaysAgo) {
   return clamp(snappedEndDaysAgo, 0, maxAlignedEndDaysAgo)
 }
 
-function ArchiveChartPanel({ data, signal, holidayWindows, defaultWindowDays, cohortControls = null }) {
+function ArchiveChartPanel({
+  data,
+  signal,
+  holidayWindows,
+  defaultWindowDays,
+  cohortControls = null,
+  cohortLabel = null,
+  displayMode = false,
+}) {
   const hasData = data.length > 0
   const sampledAtTimestamps = useMemo(() => data.map((sample) => Date.parse(sample.sampledAt || 0)), [data])
   const latestTimestamp = sampledAtTimestamps[sampledAtTimestamps.length - 1] || 0
@@ -1930,6 +1978,8 @@ function ArchiveChartPanel({ data, signal, holidayWindows, defaultWindowDays, co
   const [archiveWindowDays, setArchiveWindowDaysState] = useState(defaultWindowDays)
   const [endDaysAgo, setEndDaysAgo] = useState(0)
   const [sharedHoverIndex, setSharedHoverIndex] = useState(null)
+  const [primaryChartFrameRef, primaryChartFrameSize] = useElementSize()
+  const [secondaryChartFrameRef, secondaryChartFrameSize] = useElementSize()
   const effectiveWindowDays = clamp(archiveWindowDays, 1, maxDaysAvailable)
   const maxEndDaysAgo = Math.max(0, maxDaysAvailable - effectiveWindowDays)
   const archivePositionSnapDays = getArchivePositionSnapDays(archiveWindowDays)
@@ -1940,7 +1990,7 @@ function ArchiveChartPanel({ data, signal, holidayWindows, defaultWindowDays, co
   const sliderValue = maxArchivePositionStep - currentArchivePositionStep
   const sliderPercent = maxArchivePositionStep > 0 ? (sliderValue / maxArchivePositionStep) * 100 : 100
   const isDenseWindow = archiveWindowDays >= 28
-  const primaryLineWidth = isDenseWindow ? 1.45 : 2.5
+  const primaryLineWidth = displayMode ? 2 : isDenseWindow ? 1.45 : 2.5
   const referenceLineWidth = isDenseWindow ? 0.75 : 1
   const signalUsesPredictionBandModel = PREDICTION_BAND_MODELS.has(signal?.concurrentPredictionModel)
 
@@ -2007,109 +2057,134 @@ function ArchiveChartPanel({ data, signal, holidayWindows, defaultWindowDays, co
   }
 
   return (
-    <section className="panel chart-panel history-panel">
+    <section className={`panel chart-panel history-panel${displayMode ? ' history-panel-display' : ''}`}>
       <div className="panel-header">
         <div><h2>Traffic Archive</h2></div>
       </div>
-      <div className="chart-toolbar">
-        <div className="chart-range-copy">
-          <strong>
-            {formatArchiveRangeDate(visibleStart)} to {formatArchiveRangeDate(visibleEnd)}
-          </strong>
-        </div>
-      </div>
-      <div className="chart-range-toolbar">
-        <div className="chart-range-slider">
-          <div className="chart-range-slider-copy">
-            <span>Past</span>
-            <span>Now</span>
+      {displayMode ? (
+        <div className="chart-toolbar chart-toolbar-display">
+          <div className="chart-range-copy">
+            <strong>
+              Past month: {formatArchiveRangeDate(visibleStart)} to {formatArchiveRangeDate(visibleEnd)}
+            </strong>
+            <span>
+              {cohortLabel || 'Tracked aircraft'} airborne at the same time. Last update: {formatTimestamp(visibleEnd)}.
+            </span>
           </div>
-          <div className="chart-range-slider-stack">
-            <div className="chart-range-track" />
-            <div
-              className="chart-range-track-active"
-              style={{
-                left: 0,
-                right: `${100 - sliderPercent}%`,
-              }}
-            />
-            <input
-              className="chart-range-input"
-              type="range"
-              min="0"
-              max={maxArchivePositionStep}
-              step="1"
-              value={sliderValue}
-              onChange={(event) => setArchivePosition(Number(event.target.value))}
-              disabled={maxArchivePositionStep === 0}
-              aria-label="Archive position"
-              aria-valuetext={clampedEndDaysAgo === 0 ? 'Now' : `${clampedEndDaysAgo} days before now`}
-            />
-          </div>
+          <ul className="chart-legend" aria-label="Chart legend">
+            <li><span className="chart-legend-swatch chart-legend-swatch-line" aria-hidden="true" />Observed</li>
+            {showPredictionStdDevBand ? (
+              <li><span className="chart-legend-swatch chart-legend-swatch-band" aria-hidden="true" />Predicted range</li>
+            ) : null}
+            {visibleHolidayWindows.length ? (
+              <li><span className="chart-legend-swatch chart-legend-swatch-holiday" aria-hidden="true" />Holiday</li>
+            ) : null}
+          </ul>
         </div>
-      </div>
-      <div className="chart-toolbar chart-toolbar-archive">
-        <fieldset className="chart-radio-group">
-          <legend className="sr-only">Historical archive window</legend>
-          <label className="chart-radio-option">
-            <input
-              type="radio"
-              name="archive-window"
-              checked={archiveWindowDays === 3}
-              onChange={() => setArchiveWindowDays(3)}
-            />
-            <span>3 days</span>
-          </label>
-          <label className="chart-radio-option">
-            <input
-              type="radio"
-              name="archive-window"
-              checked={archiveWindowDays === 7}
-              onChange={() => setArchiveWindowDays(7)}
-            />
-            <span>1 week</span>
-          </label>
-          <label className="chart-radio-option">
-            <input
-              type="radio"
-              name="archive-window"
-              checked={archiveWindowDays === 28}
-              onChange={() => setArchiveWindowDays(28)}
-            />
-            <span>1 month</span>
-          </label>
-        </fieldset>
-        {cohortControls ? (
-          <fieldset className="chart-checkbox-group cohort-toggle-group">
-            <legend className="sr-only">Aircraft categories</legend>
-            {cohortControls.options.map((option) => {
-              const loading = cohortControls.loading?.[option.id]
-              const error = cohortControls.errors?.[option.id]
-              const checked = Boolean(cohortControls.selected?.[option.id])
+      ) : (
+        <>
+          <div className="chart-toolbar">
+            <div className="chart-range-copy">
+              <strong>
+                {formatArchiveRangeDate(visibleStart)} to {formatArchiveRangeDate(visibleEnd)}
+              </strong>
+            </div>
+          </div>
+          <div className="chart-range-toolbar">
+            <div className="chart-range-slider">
+              <div className="chart-range-slider-copy">
+                <span>Past</span>
+                <span>Now</span>
+              </div>
+              <div className="chart-range-slider-stack">
+                <div className="chart-range-track" />
+                <div
+                  className="chart-range-track-active"
+                  style={{
+                    left: 0,
+                    right: `${100 - sliderPercent}%`,
+                  }}
+                />
+                <input
+                  className="chart-range-input"
+                  type="range"
+                  min="0"
+                  max={maxArchivePositionStep}
+                  step="1"
+                  value={sliderValue}
+                  onChange={(event) => setArchivePosition(Number(event.target.value))}
+                  disabled={maxArchivePositionStep === 0}
+                  aria-label="Archive position"
+                  aria-valuetext={clampedEndDaysAgo === 0 ? 'Now' : `${clampedEndDaysAgo} days before now`}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="chart-toolbar chart-toolbar-archive">
+            <fieldset className="chart-radio-group">
+              <legend className="sr-only">Historical archive window</legend>
+              <label className="chart-radio-option">
+                <input
+                  type="radio"
+                  name="archive-window"
+                  checked={archiveWindowDays === 3}
+                  onChange={() => setArchiveWindowDays(3)}
+                />
+                <span>3 days</span>
+              </label>
+              <label className="chart-radio-option">
+                <input
+                  type="radio"
+                  name="archive-window"
+                  checked={archiveWindowDays === 7}
+                  onChange={() => setArchiveWindowDays(7)}
+                />
+                <span>1 week</span>
+              </label>
+              <label className="chart-radio-option">
+                <input
+                  type="radio"
+                  name="archive-window"
+                  checked={archiveWindowDays === 28}
+                  onChange={() => setArchiveWindowDays(28)}
+                />
+                <span>1 month</span>
+              </label>
+            </fieldset>
+            {cohortControls ? (
+              <fieldset className="chart-checkbox-group cohort-toggle-group">
+                <legend className="sr-only">Aircraft categories</legend>
+                {cohortControls.options.map((option) => {
+                  const loading = cohortControls.loading?.[option.id]
+                  const error = cohortControls.errors?.[option.id]
+                  const checked = Boolean(cohortControls.selected?.[option.id])
 
-              return (
-                <label
-                  key={option.id}
-                  className={`chart-checkbox-option cohort-toggle-option${checked ? ' cohort-toggle-option-active' : ''}${loading ? ' cohort-toggle-option-loading' : ''}${error ? ' cohort-toggle-option-error' : ''}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => cohortControls.onToggle(option.id)}
-                  />
-                  <span>{option.label}</span>
-                  {loading ? <span className="cohort-toggle-status">loading</span> : null}
-                  {error ? <span className="cohort-toggle-status">error</span> : null}
-                </label>
-              )
-            })}
-          </fieldset>
-        ) : null}
-      </div>
-      <div className="chart-frame">
+                  return (
+                    <label
+                      key={option.id}
+                      className={`chart-checkbox-option cohort-toggle-option${checked ? ' cohort-toggle-option-active' : ''}${loading ? ' cohort-toggle-option-loading' : ''}${error ? ' cohort-toggle-option-error' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => cohortControls.onToggle(option.id)}
+                      />
+                      <span>{option.label}</span>
+                      {loading ? <span className="cohort-toggle-status">loading</span> : null}
+                      {error ? <span className="cohort-toggle-status">error</span> : null}
+                    </label>
+                  )
+                })}
+              </fieldset>
+            ) : null}
+          </div>
+        </>
+      )}
+      <div className="chart-frame" ref={displayMode ? primaryChartFrameRef : undefined}>
         <ArchiveSvgChart
           data={visibleData}
-          height={ARCHIVE_CHART_HEIGHT}
+          width={displayMode ? DISPLAY_MODE_CHART_WIDTH : undefined}
+          height={displayMode ? getDisplayChartHeight(primaryChartFrameSize, ARCHIVE_CHART_HEIGHT) : ARCHIVE_CHART_HEIGHT}
           windowDays={visibleWindowDays}
           yDomainMin={0}
           regions={visibleHolidayWindows}
@@ -2148,10 +2223,15 @@ function ArchiveChartPanel({ data, signal, holidayWindows, defaultWindowDays, co
           <strong>Historical Emergency Level</strong>
           <span>Level 5 is calibrated so only the highest daily peak in the trailing year should exceed it.</span>
         </div>
-        <div className="chart-frame chart-frame-secondary">
+        <div className="chart-frame chart-frame-secondary" ref={displayMode ? secondaryChartFrameRef : undefined}>
           <ArchiveSvgChart
             data={visibleData}
-            height={ARCHIVE_DIVERGENCE_HEIGHT}
+            width={displayMode ? DISPLAY_MODE_CHART_WIDTH : undefined}
+            height={
+              displayMode
+                ? getDisplayChartHeight(secondaryChartFrameSize, ARCHIVE_DIVERGENCE_HEIGHT)
+                : ARCHIVE_DIVERGENCE_HEIGHT
+            }
             windowDays={visibleWindowDays}
             regions={visibleHolidayWindows}
             hoverIndex={visibleHoverIndex}
@@ -2421,7 +2501,7 @@ function createEqualEarthSphere() {
 const MAPLIBRE_GRATICULE_FEATURE_COLLECTION = createEqualEarthGraticule()
 const MAPLIBRE_SPHERE_FEATURE_COLLECTION = createEqualEarthSphere()
 
-function createMapLibreEqualEarthStyle() {
+function createMapLibreEqualEarthStyle({ displayMode = false } = {}) {
   return {
     version: 8,
     sources: {
@@ -2451,7 +2531,8 @@ function createMapLibreEqualEarthStyle() {
         id: 'background',
         type: 'background',
         paint: {
-          'background-color': '#ffffff',
+          // Display mode crops the map to cover the screen, so the corners outside the globe read as ocean.
+          'background-color': displayMode ? '#fafafa' : '#ffffff',
         },
       },
       {
@@ -2460,7 +2541,7 @@ function createMapLibreEqualEarthStyle() {
         source: 'equal-earth-sphere',
         paint: {
           'fill-color': '#fafafa',
-          'fill-outline-color': '#999999',
+          'fill-outline-color': displayMode ? '#fafafa' : '#999999',
         },
       },
       {
@@ -2547,6 +2628,7 @@ function createMapLibreEqualEarthStyle() {
         paint: {
           'line-color': '#999999',
           'line-width': 1,
+          'line-opacity': displayMode ? 0 : 1,
         },
       },
     ],
@@ -2642,6 +2724,19 @@ function fitMapLibreWorld(
 
   setMapMinZoom(minZoom)
   setMapZoom(map.getZoom())
+}
+
+function fitMapLibreWorldToCover(map) {
+  const [[west, south], [east, north]] = MAPLIBRE_WORLD_BOUNDS
+  map.jumpTo({ center: [0, 0], zoom: 0 })
+  const northWest = map.project([west, north])
+  const southEast = map.project([east, south])
+  const canvas = map.getCanvas()
+  const scale = Math.max(
+    canvas.clientWidth / Math.max(1, southEast.x - northWest.x),
+    canvas.clientHeight / Math.max(1, southEast.y - northWest.y),
+  )
+  map.jumpTo({ center: [0, 0], zoom: map.getZoom() + Math.log2(scale) })
 }
 
 function getMapLibreConstrainedCenter(map, minZoom) {
@@ -2741,7 +2836,7 @@ function hasValidMapPosition(plane) {
   return true
 }
 
-function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null }) {
+function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null, displayMode = false }) {
   const isNarrowLayout = useIsNarrowLayout()
   const [selectedMarkerId, setSelectedMarkerId] = useState(null)
   const [hoveredMarkerId, setHoveredMarkerId] = useState(null)
@@ -2808,6 +2903,30 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null }) {
     }
   }, [aircraft, hoveredMarkerId, selectedMarkerId])
   const canZoomIn = mapZoom < mapMinZoom + MAPLIBRE_MAX_ZOOM_DELTA - MAPLIBRE_ZOOM_EPSILON
+
+  useEffect(() => {
+    if (!displayMode) {
+      return undefined
+    }
+
+    // Unattended displays highlight a different random aircraft periodically, as if a visitor had clicked it.
+    function highlightRandomPlane() {
+      setSelectedMarkerId((currentMarkerId) => {
+        const markerIds = [...aircraftByMarkerId]
+          .filter(([, plane]) => hasValidMapPosition(plane))
+          .map(([markerId]) => markerId)
+        const candidates = markerIds.length > 1 ? markerIds.filter((markerId) => markerId !== currentMarkerId) : markerIds
+        return candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : null
+      })
+    }
+
+    highlightRandomPlane()
+    const intervalId = window.setInterval(highlightRandomPlane, DISPLAY_MODE_HIGHLIGHT_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [aircraftByMarkerId, displayMode])
   const canZoomOut = mapZoom > mapMinZoom + MAPLIBRE_ZOOM_EPSILON
 
   useEffect(() => {
@@ -2844,9 +2963,11 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null }) {
       try {
       map = new maplibregl.Map({
         container: mapContainerRef.current,
-        style: createMapLibreEqualEarthStyle(),
+        style: createMapLibreEqualEarthStyle({ displayMode }),
         center: [0, 0],
         zoom: 0,
+        minZoom: displayMode ? -2 : 0,
+        interactive: !displayMode,
         attributionControl: false,
         renderWorldCopies: false,
         dragRotate: false,
@@ -2870,7 +2991,9 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null }) {
       }
 
       map.on('zoom', updateZoomState)
-      map.on('moveend', enforceBounds)
+      if (!displayMode) {
+        map.on('moveend', enforceBounds)
+      }
       map.on('load', async () => {
         try {
           await addMapLibreAircraftImages(map)
@@ -2941,6 +3064,11 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null }) {
           },
         })
 
+        if (displayMode) {
+          fitMapLibreWorldToCover(map)
+          return
+        }
+
         fitMapLibreWorld(map, minZoomRef, setMapZoom, setMapMinZoom, {
           initialBounds: isNarrowLayout ? MAPLIBRE_CONUS_BOUNDS : MAPLIBRE_WORLD_BOUNDS,
         })
@@ -2976,6 +3104,10 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null }) {
             return
           }
           map.resize()
+          if (displayMode) {
+            fitMapLibreWorldToCover(map)
+            return
+          }
           fitMapLibreWorld(map, minZoomRef, setMapZoom, setMapMinZoom, { preserveZoom: true })
           enforceMapLibreBounds(map, minZoomRef.current, clampingRef)
         })
@@ -2997,7 +3129,7 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null }) {
         mapRef.current = null
       }
     }
-  }, [dataUnavailable, isNarrowLayout])
+  }, [dataUnavailable, displayMode, isNarrowLayout])
 
   function zoomMap(delta) {
     const map = mapRef.current
@@ -3041,10 +3173,12 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null }) {
   }
 
   return (
-    <section className="panel map-panel">
-      <div className="panel-header">
-        <div><h2>{dataUnavailable ? 'ADSB Data Unavailable' : 'Realtime Tracker'}</h2></div>
-      </div>
+    <section className={displayMode ? 'map-panel map-panel-display' : 'panel map-panel'}>
+      {displayMode ? null : (
+        <div className="panel-header">
+          <div><h2>{dataUnavailable ? 'ADSB Data Unavailable' : 'Realtime Tracker'}</h2></div>
+        </div>
+      )}
 
       <div className="map-frame">
         {dataUnavailable || mapError ? (
@@ -3061,14 +3195,16 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null }) {
           </div>
         ) : (
           <>
-            <div className="map-controls" aria-label="Map controls">
-              <button type="button" className="map-control-button map-zoom-button" onClick={() => zoomMap(MAPLIBRE_ZOOM_STEP)} aria-label="Zoom in" disabled={!canZoomIn}>
-                <span className="map-zoom-icon map-zoom-plus" aria-hidden="true" />
-              </button>
-              <button type="button" className="map-control-button map-zoom-button" onClick={() => zoomMap(-MAPLIBRE_ZOOM_STEP)} aria-label="Zoom out" disabled={!canZoomOut}>
-                <span className="map-zoom-icon map-zoom-minus" aria-hidden="true" />
-              </button>
-            </div>
+            {displayMode ? null : (
+              <div className="map-controls" aria-label="Map controls">
+                <button type="button" className="map-control-button map-zoom-button" onClick={() => zoomMap(MAPLIBRE_ZOOM_STEP)} aria-label="Zoom in" disabled={!canZoomIn}>
+                  <span className="map-zoom-icon map-zoom-plus" aria-hidden="true" />
+                </button>
+                <button type="button" className="map-control-button map-zoom-button" onClick={() => zoomMap(-MAPLIBRE_ZOOM_STEP)} aria-label="Zoom out" disabled={!canZoomOut}>
+                  <span className="map-zoom-icon map-zoom-minus" aria-hidden="true" />
+                </button>
+              </div>
+            )}
             {displayedPlane ? (
               <div className="map-hover-card map-hover-card-active">
                 <>
@@ -5822,7 +5958,12 @@ function AdminTestAlertPage() {
   )
 }
 
-function DashboardApp({ dashboardUrl = DASHBOARD_URL, enableCohortControls = false, primaryCohortKind = 'business' }) {
+function DashboardApp({
+  dashboardUrl = DASHBOARD_URL,
+  enableCohortControls = false,
+  primaryCohortKind = 'business',
+  displayMode = null,
+}) {
   const [dashboard, setDashboard] = useState(null)
   const [error, setError] = useState(null)
   const [selectedCohorts, setSelectedCohorts] = useState(() => ({
@@ -5882,7 +6023,13 @@ function DashboardApp({ dashboardUrl = DASHBOARD_URL, enableCohortControls = fal
       markBackgroundReady()
     }
 
+    // Display mode runs unattended on exhibition screens, so failed loads retry sooner than the regular refresh.
+    const pollIntervalMs = displayMode ? DISPLAY_MODE_POLL_INTERVAL_MS : DASHBOARD_POLL_INTERVAL_MS
+    const retryIntervalMs = displayMode ? DISPLAY_MODE_RETRY_INTERVAL_MS : DASHBOARD_POLL_INTERVAL_MS
+    let timeoutId = null
+
     async function loadDashboard() {
+      let nextDelayMs = pollIntervalMs
       try {
         const nextDashboard = await fetchDashboardSnapshot(dashboardUrl)
         if (active) {
@@ -5890,22 +6037,39 @@ function DashboardApp({ dashboardUrl = DASHBOARD_URL, enableCohortControls = fal
         }
       } catch (nextError) {
         logDashboardLoadError('Primary dashboard load failed', nextError)
+        nextDelayMs = retryIntervalMs
         if (active) {
           setError(getDashboardLoadErrorMessage(nextError))
         }
       }
+
+      if (active) {
+        timeoutId = window.setTimeout(loadDashboard, nextDelayMs)
+      }
     }
 
     loadDashboard()
-    const intervalId = window.setInterval(loadDashboard, DASHBOARD_POLL_INTERVAL_MS)
 
     return () => {
       active = false
       backgroundPreload?.removeEventListener('load', markBackgroundReady)
       backgroundPreload?.removeEventListener('error', markBackgroundReady)
-      window.clearInterval(intervalId)
+      window.clearTimeout(timeoutId)
     }
-  }, [dashboardUrl])
+  }, [dashboardUrl, displayMode])
+
+  useEffect(() => {
+    if (!displayMode) {
+      return undefined
+    }
+
+    const classNames = ['display-mode', `display-mode-${displayMode}`]
+    document.documentElement.classList.add(...classNames)
+
+    return () => {
+      document.documentElement.classList.remove(...classNames)
+    }
+  }, [displayMode])
 
   useEffect(() => {
     extraDashboardsRef.current = extraDashboards
@@ -6124,7 +6288,36 @@ function DashboardApp({ dashboardUrl = DASHBOARD_URL, enableCohortControls = fal
           .map((config) => config.label)
       : []
 
-    content = (
+    const displayModeContent = displayMode === 'map' ? (
+      <main className="app-shell display-shell display-shell-map">
+        {hasDashboard ? (
+          <GlobalMap
+            aircraft={liveAircraft}
+            dataUnavailable={adsbDataStatus.isUnavailable}
+            liveStatus={liveStatus}
+            displayMode
+          />
+        ) : (
+          <DataUnavailablePanel title="Realtime Tracker Unavailable" message={dashboardErrorMessage} />
+        )}
+      </main>
+    ) : displayMode === 'activity' ? (
+      <main className="app-shell display-shell display-shell-activity">
+        {hasDashboard ? (
+          <ArchiveChart
+            data={archiveData}
+            signal={compositeSignal}
+            holidayWindows={holidayWindows}
+            cohortLabel={COHORT_CONFIGS.find((config) => config.id === primaryCohortKind)?.label}
+            displayMode
+          />
+        ) : (
+          <DataUnavailablePanel title="Traffic Archive Unavailable" message={dashboardErrorMessage} />
+        )}
+      </main>
+    ) : null
+
+    content = displayModeContent ?? (
       <main className="app-shell">
         <p className="signup-provider-notice homepage-signup-notice">
           <a href="/signup">Sign up</a> for text message or email notifications.
@@ -6268,7 +6461,9 @@ function DashboardApp({ dashboardUrl = DASHBOARD_URL, enableCohortControls = fal
 
   return (
     <>
-      <div className="background-wallpaper" style={{ backgroundImage: `url("${BACKGROUND_URL}")` }} aria-hidden="true" />
+      {displayMode === 'map' ? null : (
+        <div className="background-wallpaper" style={{ backgroundImage: `url("${BACKGROUND_URL}")` }} aria-hidden="true" />
+      )}
       {content}
     </>
   )
@@ -6309,7 +6504,17 @@ function App() {
     return <AdminTestAlertPage />
   }
 
-  return <DashboardApp dashboardUrl={DASHBOARD_URL} enableCohortControls primaryCohortKind="business" />
+  const requestedDisplayMode = new URLSearchParams(window.location.search).get('display')
+  const displayMode = DISPLAY_MODES.has(requestedDisplayMode) ? requestedDisplayMode : null
+
+  return (
+    <DashboardApp
+      dashboardUrl={DASHBOARD_URL}
+      enableCohortControls={!displayMode}
+      primaryCohortKind="business"
+      displayMode={displayMode}
+    />
+  )
 }
 
 export default App
