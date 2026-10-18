@@ -9,7 +9,7 @@ import sys
 import urllib.error
 import urllib.request
 
-from parse_heatmap import parse_heatmap
+from parse_heatmap import parse_latest_heatmap_slice
 from db_migrations import migrate_schema
 
 
@@ -40,15 +40,22 @@ def parse_args():
     parser.add_argument(
         "--fill-recent-slots",
         action="store_true",
-        help="Also ingest any missing slots in the latest 24-hour window.",
+        help="Also ingest any missing slots in the recent window, so skipped scheduled runs leave no gaps.",
     )
+    parser.add_argument(
+        "--recent-slots",
+        type=int,
+        default=RECENT_WINDOW_SLOTS,
+        help="Number of 30-minute slots, ending at the latest one, that --fill-recent-slots keeps complete.",
+    )
+    parser.add_argument("--cache-dir", default=str(LIVE_CACHE_DIR), help="Heatmap cache directory.")
+    parser.add_argument("--skip-download", action="store_true", help="Use cached heatmaps only.")
     parser.add_argument("--force", action="store_true", help="Re-parse even if the newest cached slot is unchanged.")
     return parser.parse_args()
 
 
 def ensure_directories():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    LIVE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def open_db(path):
@@ -103,9 +110,9 @@ def slot_key_for(timestamp):
     return f"{timestamp.date().isoformat()}:{slot_index_for(timestamp):02d}"
 
 
-def cache_path_for(timestamp):
+def cache_path_for(cache_dir, timestamp):
     return (
-        LIVE_CACHE_DIR
+        pathlib.Path(cache_dir)
         / f"{timestamp.year:04d}"
         / f"{timestamp.month:02d}"
         / f"{timestamp.day:02d}"
@@ -120,10 +127,13 @@ def heatmap_url_for(timestamp):
     )
 
 
-def download_heatmap(timestamp, destination, timeout_seconds=120):
-    destination.parent.mkdir(parents=True, exist_ok=True)
+def download_heatmap(timestamp, destination, skip_download=False, timeout_seconds=120):
     if destination.exists():
         return True, True
+    if skip_download:
+        return False, False
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
 
     request = urllib.request.Request(
         heatmap_url_for(timestamp),
@@ -139,15 +149,15 @@ def download_heatmap(timestamp, destination, timeout_seconds=120):
         raise
 
 
-def choose_latest_heatmap(now, lookback_slots):
+def choose_latest_heatmap(now, lookback_slots, cache_dir=LIVE_CACHE_DIR, skip_download=False):
     latest_slot = floor_to_half_hour(now)
     last_error = None
 
     for offset in range(lookback_slots + 1):
         candidate = latest_slot - dt.timedelta(minutes=30 * offset)
-        cache_path = cache_path_for(candidate)
+        cache_path = cache_path_for(cache_dir, candidate)
         try:
-            available, used_cache = download_heatmap(candidate, cache_path)
+            available, used_cache = download_heatmap(candidate, cache_path, skip_download)
         except Exception as error:  # pragma: no cover - defensive network handling
             last_error = error
             continue
@@ -170,15 +180,11 @@ def choose_latest_heatmap(now, lookback_slots):
 
 
 def parse_latest_slice(cache_path):
-    slices = parse_heatmap(str(cache_path), return_callsigns=False)
-    if not slices:
-        return None
-
-    return max(slices, key=lambda item: item.timestamp)
+    return parse_latest_heatmap_slice(str(cache_path), return_callsigns=False)
 
 
-def recent_sample_count(connection, latest_slot):
-    window_start_iso = (latest_slot - dt.timedelta(minutes=30 * (RECENT_WINDOW_SLOTS - 1))).isoformat()
+def recent_sample_count(connection, latest_slot, recent_slots=RECENT_WINDOW_SLOTS):
+    window_start_iso = (latest_slot - dt.timedelta(minutes=30 * (recent_slots - 1))).isoformat()
     window_end_iso = (latest_slot + dt.timedelta(minutes=30)).isoformat()
     row = connection.execute(
         """
@@ -209,14 +215,19 @@ def slot_already_ingested(connection, slot):
     return int(row["sample_count"] or 0) > 0
 
 
-def build_recent_slots(latest_slot):
-    start_slot = latest_slot - dt.timedelta(minutes=30 * (RECENT_WINDOW_SLOTS - 1))
-    return [start_slot + dt.timedelta(minutes=30 * offset) for offset in range(RECENT_WINDOW_SLOTS)]
+def build_recent_slots(latest_slot, recent_slots=RECENT_WINDOW_SLOTS):
+    start_slot = latest_slot - dt.timedelta(minutes=30 * (recent_slots - 1))
+    return [start_slot + dt.timedelta(minutes=30 * offset) for offset in range(recent_slots)]
 
 
-def ensure_slot_heatmap(slot):
-    cache_path = cache_path_for(slot)
-    available, used_cache = download_heatmap(slot, cache_path)
+def ensure_slot_heatmap(slot, cache_dir=LIVE_CACHE_DIR, skip_download=False):
+    cache_path = cache_path_for(cache_dir, slot)
+    try:
+        available, used_cache = download_heatmap(slot, cache_path, skip_download)
+    except Exception as error:  # pragma: no cover - defensive network handling
+        # A slot that cannot be fetched now is retried by the next run instead of failing this one.
+        print(f"Could not fetch {heatmap_url_for(slot)}: {error}", file=sys.stderr)
+        return None
     if not available:
         return None
 
@@ -414,12 +425,17 @@ def main():
             raise ValueError("No tracked aircraft found. Run `npm run import:faa` first.")
 
         tracked_by_hex = {entry["hex"]: entry for entry in tracked_entries}
-        selected = choose_latest_heatmap(dt.datetime.now(dt.timezone.utc), args.lookback_slots)
+        selected = choose_latest_heatmap(
+            dt.datetime.now(dt.timezone.utc),
+            args.lookback_slots,
+            args.cache_dir,
+            args.skip_download,
+        )
         current_slot_key = get_meta(connection, META_SLOT_KEY)
-        current_window_samples = recent_sample_count(connection, selected["slot"])
+        current_window_samples = recent_sample_count(connection, selected["slot"], args.recent_slots)
 
         latest_slot_already_current = current_slot_key == selected["slot_key"]
-        recent_window_already_full = current_window_samples >= RECENT_WINDOW_SLOTS - 1
+        recent_window_already_full = current_window_samples >= args.recent_slots
         if latest_slot_already_current and not args.force and (
             not args.fill_recent_slots or recent_window_already_full
         ):
@@ -450,12 +466,17 @@ def main():
         latest_result = None
         selected_used_cache = selected["used_cache"]
 
-        slots_to_ingest = build_recent_slots(selected["slot"]) if args.fill_recent_slots else [selected["slot"]]
+        filled_slot_count = 0
+        slots_to_ingest = (
+            build_recent_slots(selected["slot"], args.recent_slots) if args.fill_recent_slots else [selected["slot"]]
+        )
         for slot in slots_to_ingest:
             if slot != selected["slot"] and not args.force and slot_already_ingested(connection, slot):
                 continue
 
-            slot_info = selected if slot == selected["slot"] else ensure_slot_heatmap(slot)
+            slot_info = (
+                selected if slot == selected["slot"] else ensure_slot_heatmap(slot, args.cache_dir, args.skip_download)
+            )
             if slot_info is None:
                 continue
 
@@ -467,6 +488,8 @@ def main():
             if slot == selected["slot"]:
                 latest_result = result
                 selected_used_cache = slot_info["used_cache"]
+            else:
+                filled_slot_count += 1
 
         if latest_result is None:
             raise ValueError(f"Could not parse a usable latest heatmap from {selected['cache_path']}")
@@ -514,6 +537,7 @@ def main():
                     "matchedCount": latest_result["matched_count"],
                     "airborneCount": latest_result["airborne_count"],
                     "concurrentCount": latest_result["concurrent_count"],
+                    "filledSlotCount": filled_slot_count,
                 }
             )
         )

@@ -66,6 +66,17 @@ def parse_args():
         help="How many 30-minute slots to search backward with --latest-live.",
     )
     parser.add_argument(
+        "--fill-recent-slots",
+        action="store_true",
+        help="With --latest-live, also ingest any missing slots in the recent window.",
+    )
+    parser.add_argument(
+        "--recent-slots",
+        type=int,
+        default=48,
+        help="Number of 30-minute slots, ending at the latest one, that --fill-recent-slots keeps complete.",
+    )
+    parser.add_argument(
         "--metrics-only",
         action="store_true",
         help="Skip per-hex non_icao_activity rows and store only aggregate metrics.",
@@ -459,6 +470,41 @@ def upsert_dashboard_concurrent_metric(connection, metric_row):
     )
 
 
+def slot_has_concurrent_metric(connection, slot):
+    row = connection.execute(
+        """
+        SELECT COUNT(*) AS sample_count
+        FROM concurrent_metrics
+        WHERE sampled_at >= ?
+          AND sampled_at < ?
+        """,
+        (slot.isoformat(), (slot + dt.timedelta(minutes=30)).isoformat()),
+    ).fetchone()
+    return int(row["sample_count"] or 0) > 0
+
+
+def fill_recent_slots(connection, cache_dir, latest_slot, recent_slots, skip_download, rate_limit_seconds):
+    filled_slot_count = 0
+    for offset in range(recent_slots - 1, 0, -1):
+        slot = latest_slot - dt.timedelta(minutes=30 * offset)
+        if slot_has_concurrent_metric(connection, slot):
+            continue
+
+        destination = cache_path_for(cache_dir, slot.date(), slot_index_for(slot))
+        if skip_download:
+            available = destination.exists()
+        else:
+            available = download_heatmap(slot.date(), slot_index_for(slot), destination, rate_limit_seconds)
+        if not available:
+            continue
+
+        _, _, parsed_file = ingest_file(connection, destination, metrics_only=True, write_concurrent_metrics=True)
+        if parsed_file:
+            filled_slot_count += 1
+
+    return filled_slot_count
+
+
 def ingest_file(connection, cache_path, metrics_only=False, write_concurrent_metrics=False):
     if metrics_only:
         sampled_at, metric_row = parse_non_icao_metric_heatmap(cache_path)
@@ -845,6 +891,14 @@ def main():
                 write_concurrent_metrics=True,
             )
             live_snapshot = replace_live_snapshot(connection, selected["cache_path"])
+            filled_slot_count = fill_recent_slots(
+                connection,
+                cache_dir,
+                selected["slot"],
+                args.recent_slots,
+                args.skip_download,
+                args.rate_limit_seconds,
+            ) if args.fill_recent_slots else 0
             connection.execute(
                 "UPDATE ingestion_runs SET finished_at = ?, status = ?, details = ? WHERE id = ?",
                 (
@@ -863,6 +917,7 @@ def main():
                             "observation_count": observation_count,
                             "latest_parsed_file": latest_parsed_file,
                             "live_snapshot": live_snapshot,
+                            "filled_slot_count": filled_slot_count,
                         },
                         separators=(",", ":"),
                     ),
@@ -896,6 +951,7 @@ def main():
                     if latest_parsed_file
                     else 0,
                     "liveSnapshotCount": live_snapshot["snapshot_rows"] if live_snapshot else 0,
+                    "filledSlotCount": filled_slot_count,
                 }
             )
         )

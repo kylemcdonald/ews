@@ -29,9 +29,10 @@ env:
   VITE_MILITARY_DASHBOARD_URL: https://pub-49bb6a6f314c47be9b481c25e5f6ca9e.r2.dev/military-dashboard.json
   VITE_UNTRACKED_DASHBOARD_URL: https://pub-49bb6a6f314c47be9b481c25e5f6ca9e.r2.dev/untracked-dashboard.json
 
+# A second trigger waits for the running refresh instead of cancelling it mid-upload.
 concurrency:
   group: refresh-live-data
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   refresh:
@@ -97,13 +98,13 @@ jobs:
           python3 scripts/track_non_icao_hex.py --db "${UNTRACKED_DB_PATH}" --latest-live --cache-dir data/cache/adsbx_live --replace-live-snapshot
 
       - name: Refresh latest main heatmap
-        run: python3 scripts/update_latest_heatmap.py --db "${MAIN_DB_PATH}"
+        run: python3 scripts/update_latest_heatmap.py --db "${MAIN_DB_PATH}" --fill-recent-slots
 
       - name: Refresh latest military heatmap
-        run: python3 scripts/update_latest_heatmap.py --db "${MILITARY_DB_PATH}"
+        run: python3 scripts/update_latest_heatmap.py --db "${MILITARY_DB_PATH}" --fill-recent-slots
 
       - name: Refresh latest untracked heatmap
-        run: python3 scripts/track_non_icao_hex.py --db "${UNTRACKED_DB_PATH}" --latest-live --cache-dir data/cache/adsbx_live --replace-live-snapshot
+        run: python3 scripts/track_non_icao_hex.py --db "${UNTRACKED_DB_PATH}" --latest-live --cache-dir data/cache/adsbx_live --replace-live-snapshot --fill-recent-slots
 
       - name: Export published dashboard snapshot
         run: node scripts/export_dashboard_snapshot.js --db "${MAIN_DB_PATH}" --output tmp/dashboard.json --endpoint main --cohort global_business_jet
@@ -278,3 +279,13 @@ jobs:
             fi
             sleep $((attempt * 15))
           done
+
+      # Runs last so a gap never blocks alerts or publishing, but still fails the run and notifies.
+      - name: Audit recent history coverage
+        run: |
+          python3 scripts/audit_recent_history_coverage.py \
+            --db "${MAIN_DB_PATH}" \
+            --db "${MILITARY_DB_PATH}" \
+            --db "${UNTRACKED_DB_PATH}" \
+            --slots 48 \
+            --max-missing 2

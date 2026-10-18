@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import pathlib
 import sqlite3
+import sys
 
 
 ROOT_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -27,6 +28,11 @@ def parse_args():
         type=int,
         default=48,
         help="Number of recent half-hour slots to check, ending at the latest recorded sample.",
+    )
+    parser.add_argument(
+        "--max-missing",
+        type=int,
+        help="Exit with an error when any DB is missing more than this many slots.",
     )
     return parser.parse_args()
 
@@ -95,7 +101,14 @@ def main():
     args = parse_args()
     db_paths = [pathlib.Path(path) for path in args.db] or [DB_PATH]
     reports = [audit_db(path, args.slots) for path in db_paths]
-    print(json.dumps({"ok": True, "reports": reports}, indent=2))
+    ok = args.max_missing is None or all(report["missingSlots"] <= args.max_missing for report in reports)
+    print(json.dumps({"ok": ok, "reports": reports}, indent=2))
+    if not ok:
+        print(
+            f"Recent history is missing more than {args.max_missing} of {args.slots} half-hour slots.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -103,13 +103,13 @@ jobs:
         run: python3 scripts/import_global_cohort.py --db "${MILITARY_DB_PATH}" --tracked-category military --tracked-source global_military_aircraft --refresh
 
       - name: Refresh latest main heatmap
-        run: python3 scripts/update_latest_heatmap.py --db "${MAIN_DB_PATH}"
+        run: python3 scripts/update_latest_heatmap.py --db "${MAIN_DB_PATH}" --fill-recent-slots
 
       - name: Refresh latest military heatmap
-        run: python3 scripts/update_latest_heatmap.py --db "${MILITARY_DB_PATH}"
+        run: python3 scripts/update_latest_heatmap.py --db "${MILITARY_DB_PATH}" --fill-recent-slots
 
       - name: Refresh latest untracked heatmap
-        run: python3 scripts/track_non_icao_hex.py --db "${UNTRACKED_DB_PATH}" --latest-live --cache-dir data/cache/adsbx_live --replace-live-snapshot
+        run: python3 scripts/track_non_icao_hex.py --db "${UNTRACKED_DB_PATH}" --latest-live --cache-dir data/cache/adsbx_live --replace-live-snapshot --fill-recent-slots
 
       - name: Audit recent history coverage
         run: |
