@@ -1,9 +1,8 @@
 name: Refresh Daily Metadata
 
+# Dispatched daily at 00:20 UTC by the ews-refresh-trigger Cloudflare Worker (wrangler.refresh-trigger.toml).
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "29 0 * * *"
 
 permissions:
   contents: read
@@ -28,8 +27,10 @@ env:
   VITE_MILITARY_DASHBOARD_URL: https://pub-49bb6a6f314c47be9b481c25e5f6ca9e.r2.dev/military-dashboard.json
   VITE_UNTRACKED_DASHBOARD_URL: https://pub-49bb6a6f314c47be9b481c25e5f6ca9e.r2.dev/untracked-dashboard.json
 
+# Shares the live refresh's group: both restore and upload the same state DBs, so overlapping
+# runs would overwrite each other's uploads.
 concurrency:
-  group: refresh-daily-metadata
+  group: refresh-live-data
   cancel-in-progress: false
 
 jobs:

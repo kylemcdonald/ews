@@ -7,7 +7,8 @@ workers_dev = false
 GITHUB_REPOSITORY = "kylemcdonald/ews"
 GITHUB_REF = "main"
 
-# Dispatch each refresh at :05 and :35 UTC, and retry at :20 and :50 if that run was lost or failed.
+# The only scheduler for the repository's workflows; SCHEDULES in the worker says which window each
+# tick serves (the live refresh at :05/:35 with a retry at :20/:50, plus two daily jobs).
 # GITHUB_DISPATCH_TOKEN is a fine-grained token limited to Actions read/write on this repository.
 [triggers]
 crons = ["5,20,35,50 * * * *"]

@@ -1,9 +1,8 @@
 name: Refresh Live Data
 
+# Dispatched every half hour by the ews-refresh-trigger Cloudflare Worker (wrangler.refresh-trigger.toml).
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "5,35 * * * *"
 
 permissions:
   contents: read

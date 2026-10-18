@@ -1,9 +1,8 @@
 name: Send Renewal Reminders
 
+# Dispatched daily at 17:05 UTC by the ews-refresh-trigger Cloudflare Worker (wrangler.refresh-trigger.toml).
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 17 * * *"
 
 permissions:
   contents: read
