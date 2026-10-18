@@ -1,0 +1,13 @@
+name = "ews-refresh-trigger"
+main = "workers/refresh-trigger.js"
+compatibility_date = "2026-05-05"
+workers_dev = false
+
+[vars]
+GITHUB_REPOSITORY = "kylemcdonald/ews"
+GITHUB_REF = "main"
+
+# Dispatch each refresh at :05 and :35 UTC, and retry at :20 and :50 if that run was lost or failed.
+# GITHUB_DISPATCH_TOKEN is a fine-grained token limited to Actions read/write on this repository.
+[triggers]
+crons = ["5,20,35,50 * * * *"]

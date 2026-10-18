@@ -10,7 +10,9 @@ on:
       - functions/**
       - migrations/**
       - workers/alert-dispatch.js
+      - workers/refresh-trigger.js
       - wrangler.alerts.toml
+      - wrangler.refresh-trigger.toml
       - wrangler.production.toml
       - tests/**
       - package.json
@@ -58,6 +60,7 @@ jobs:
           npm run lint
           npm run test:notifications
           npm run test:access
+          npm run test:refresh-trigger
 
       - name: Configure production bindings
         run: cp wrangler.production.toml wrangler.toml
@@ -75,6 +78,15 @@ jobs:
           test -n "$INTERNAL_ALERT_TOKEN"
           wrangler deploy --config wrangler.alerts.toml
           printf '%s' "$INTERNAL_ALERT_TOKEN" | wrangler secret put INTERNAL_ALERT_TOKEN --config wrangler.alerts.toml
+
+      - name: Deploy live refresh trigger
+        env:
+          REFRESH_DISPATCH_TOKEN: ${{ secrets.EWS_REFRESH_DISPATCH_TOKEN }}
+        run: |
+          wrangler deploy --config wrangler.refresh-trigger.toml
+          if [ -n "$REFRESH_DISPATCH_TOKEN" ]; then
+            printf '%s' "$REFRESH_DISPATCH_TOKEN" | wrangler secret put GITHUB_DISPATCH_TOKEN --config wrangler.refresh-trigger.toml
+          fi
 
       - name: Apply public snapshot CORS
         run: wrangler r2 bucket cors set "${PUBLIC_BUCKET}" --file config/r2.public.cors.json

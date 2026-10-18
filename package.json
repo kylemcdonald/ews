@@ -44,6 +44,7 @@
     "lint": "npm run lint --workspace client",
     "test:notifications": "node --test tests/notification-free-tier.test.cjs",
     "test:access": "node --test tests/access-auth.test.cjs",
+    "test:refresh-trigger": "node --test tests/refresh-trigger.test.cjs",
     "test:ingestion": "python3 -m unittest discover -s tests -p \"test_*.py\"",
     "test:admin": "node tests/admin-free-tier.browser.cjs"
   },
