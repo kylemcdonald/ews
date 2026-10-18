@@ -1,4 +1,4 @@
-import { Suspense, lazy, startTransition, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, startTransition, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { parsePhoneNumberFromString } from 'libphonenumber-js/min'
 import proj4 from 'proj4'
 import './App.css'
@@ -2501,7 +2501,7 @@ function createEqualEarthSphere() {
 const MAPLIBRE_GRATICULE_FEATURE_COLLECTION = createEqualEarthGraticule()
 const MAPLIBRE_SPHERE_FEATURE_COLLECTION = createEqualEarthSphere()
 
-function createMapLibreEqualEarthStyle({ displayMode = false } = {}) {
+function createMapLibreEqualEarthStyle() {
   return {
     version: 8,
     sources: {
@@ -2532,7 +2532,7 @@ function createMapLibreEqualEarthStyle({ displayMode = false } = {}) {
         type: 'background',
         paint: {
           // Display mode crops the map to cover the screen, so the corners outside the globe read as ocean.
-          'background-color': displayMode ? '#fafafa' : '#ffffff',
+          'background-color': '#ffffff',
         },
       },
       {
@@ -2541,7 +2541,7 @@ function createMapLibreEqualEarthStyle({ displayMode = false } = {}) {
         source: 'equal-earth-sphere',
         paint: {
           'fill-color': '#fafafa',
-          'fill-outline-color': displayMode ? '#fafafa' : '#999999',
+          'fill-outline-color': '#999999',
         },
       },
       {
@@ -2628,7 +2628,7 @@ function createMapLibreEqualEarthStyle({ displayMode = false } = {}) {
         paint: {
           'line-color': '#999999',
           'line-width': 1,
-          'line-opacity': displayMode ? 0 : 1,
+          'line-opacity': 1,
         },
       },
     ],
@@ -2726,13 +2726,13 @@ function fitMapLibreWorld(
   setMapZoom(map.getZoom())
 }
 
-function fitMapLibreWorldToCover(map) {
+function fitMapLibreWorldToContain(map) {
   const [[west, south], [east, north]] = MAPLIBRE_WORLD_BOUNDS
   map.jumpTo({ center: [0, 0], zoom: 0 })
   const northWest = map.project([west, north])
   const southEast = map.project([east, south])
   const canvas = map.getCanvas()
-  const scale = Math.max(
+  const scale = Math.min(
     canvas.clientWidth / Math.max(1, southEast.x - northWest.x),
     canvas.clientHeight / Math.max(1, southEast.y - northWest.y),
   )
@@ -2843,6 +2843,9 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null, displ
   const [mapZoom, setMapZoom] = useState(0)
   const [mapMinZoom, setMapMinZoom] = useState(0)
   const [mapError, setMapError] = useState(null)
+  const [hoverCardAlignRight, setHoverCardAlignRight] = useState(false)
+  const mapFrameRef = useRef(null)
+  const hoverCardRef = useRef(null)
   const mapContainerRef = useRef(null)
   const mapRef = useRef(null)
   const minZoomRef = useRef(0)
@@ -2927,6 +2930,29 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null, displ
       window.clearInterval(intervalId)
     }
   }, [aircraftByMarkerId, displayMode])
+
+  useLayoutEffect(() => {
+    const map = mapRef.current
+    const frame = mapFrameRef.current
+    const card = hoverCardRef.current
+    if (!displayMode || !displayedPlane || !map || !frame || !card) {
+      return
+    }
+
+    const coordinate = geogLonLatToEqualEarthMercatorLonLat([Number(displayedPlane.lon), Number(displayedPlane.lat)])
+    if (!coordinate) {
+      return
+    }
+
+    // The card sits in the mostly empty South Pacific corner unless it would cover the highlighted aircraft.
+    const point = map.project(coordinate)
+    const canvasRect = map.getCanvas().getBoundingClientRect()
+    const frameRect = frame.getBoundingClientRect()
+    const x = canvasRect.left + point.x - frameRect.left
+    const y = canvasRect.top + point.y - frameRect.top
+    const margin = 32
+    setHoverCardAlignRight(x < card.offsetWidth + margin && y > frameRect.height - card.offsetHeight - margin)
+  }, [displayMode, displayedPlane])
   const canZoomOut = mapZoom > mapMinZoom + MAPLIBRE_ZOOM_EPSILON
 
   useEffect(() => {
@@ -2963,7 +2989,7 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null, displ
       try {
       map = new maplibregl.Map({
         container: mapContainerRef.current,
-        style: createMapLibreEqualEarthStyle({ displayMode }),
+        style: createMapLibreEqualEarthStyle(),
         center: [0, 0],
         zoom: 0,
         minZoom: displayMode ? -2 : 0,
@@ -3065,7 +3091,7 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null, displ
         })
 
         if (displayMode) {
-          fitMapLibreWorldToCover(map)
+          fitMapLibreWorldToContain(map)
           return
         }
 
@@ -3105,7 +3131,7 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null, displ
           }
           map.resize()
           if (displayMode) {
-            fitMapLibreWorldToCover(map)
+            fitMapLibreWorldToContain(map)
             return
           }
           fitMapLibreWorld(map, minZoomRef, setMapZoom, setMapMinZoom, { preserveZoom: true })
@@ -3173,14 +3199,12 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null, displ
   }
 
   return (
-    <section className={displayMode ? 'map-panel map-panel-display' : 'panel map-panel'}>
-      {displayMode ? null : (
-        <div className="panel-header">
-          <div><h2>{dataUnavailable ? 'ADSB Data Unavailable' : 'Realtime Tracker'}</h2></div>
-        </div>
-      )}
+    <section className={`panel map-panel${displayMode ? ' map-panel-display' : ''}`}>
+      <div className="panel-header">
+        <div><h2>{dataUnavailable ? 'ADSB Data Unavailable' : 'Realtime Tracker'}</h2></div>
+      </div>
 
-      <div className="map-frame">
+      <div className="map-frame" ref={mapFrameRef}>
         {dataUnavailable || mapError ? (
           <div className="map-unavailable-state">
             <strong>{mapError ? 'Map Unavailable' : 'ADSB Data Unavailable'}</strong>
@@ -3206,7 +3230,10 @@ function GlobalMap({ aircraft, dataUnavailable = false, liveStatus = null, displ
               </div>
             )}
             {displayedPlane ? (
-              <div className="map-hover-card map-hover-card-active">
+              <div
+                ref={hoverCardRef}
+                className={`map-hover-card map-hover-card-active${hoverCardAlignRight ? ' map-hover-card-right' : ''}`}
+              >
                 <>
                   <div className="map-hover-header">
                     <strong>{displayedPlane.label || displayedPlane.registration || displayedPlane.hex?.toUpperCase()}</strong>
@@ -6461,9 +6488,7 @@ function DashboardApp({
 
   return (
     <>
-      {displayMode === 'map' ? null : (
-        <div className="background-wallpaper" style={{ backgroundImage: `url("${BACKGROUND_URL}")` }} aria-hidden="true" />
-      )}
+      <div className="background-wallpaper" style={{ backgroundImage: `url("${BACKGROUND_URL}")` }} aria-hidden="true" />
       {content}
     </>
   )

@@ -2464,51 +2464,62 @@ html.display-mode #root {
   pointer-events: none;
 }
 
-.display-shell-map {
-  background: #fafafa;
+.display-shell-map,
+.display-shell-activity {
+  padding: clamp(16px, 3vmin, 96px);
 }
 
-.map-panel-display,
-.map-panel-display .map-frame,
+.display-shell-map > .panel,
+.display-shell-activity > .panel {
+  height: 100%;
+}
+
+.map-panel-display {
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem 1.5rem;
+}
+
+.map-panel-display .map-frame {
+  display: grid;
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0;
+  place-items: center;
+  container-type: size;
+}
+
 .map-panel-display .map-unavailable-state {
   height: 100%;
   min-height: 0;
 }
 
-.map-panel-display,
-.map-panel-display .map-frame {
-  padding: 0;
-}
-
 html.display-mode-map {
-  font-size: clamp(16px, 1.1vw, 44px);
+  font-size: clamp(16px, 1.15vw, 44px);
 }
 
 .map-panel-display .map-hover-card {
   position: absolute;
-  top: 1.5rem;
-  right: 1.5rem;
+  top: auto;
+  right: auto;
+  bottom: 0;
+  left: 0;
   width: 20rem;
   padding: 0.75rem 1rem;
 }
 
+.map-panel-display .map-hover-card-right {
+  right: 0;
+  left: auto;
+}
+
 .map-panel-display .maplibre-map {
-  height: 100%;
+  width: min(100cqw, 100cqh * 800 / 410);
   min-height: 0;
-  aspect-ratio: auto;
-  background: #fafafa;
 }
 
 html.display-mode-activity {
   font-size: clamp(16px, 1.15vw, 44px);
-}
-
-.display-shell-activity {
-  padding: clamp(16px, 3vmin, 96px);
-}
-
-.display-shell-activity > .panel {
-  height: 100%;
 }
 
 .history-panel-display {
