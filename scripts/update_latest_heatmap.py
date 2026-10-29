@@ -6,11 +6,10 @@ import json
 import pathlib
 import sqlite3
 import sys
-import urllib.error
-import urllib.request
 
 from parse_heatmap import parse_latest_heatmap_slice
 from db_migrations import migrate_schema
+from heatmap_source import fetch_heatmap, heatmap_url_for, slot_index_for
 
 
 ROOT_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -102,10 +101,6 @@ def floor_to_half_hour(value):
     return value.replace(minute=minute, second=0, microsecond=0)
 
 
-def slot_index_for(timestamp):
-    return timestamp.hour * 2 + (1 if timestamp.minute >= 30 else 0)
-
-
 def slot_key_for(timestamp):
     return f"{timestamp.date().isoformat()}:{slot_index_for(timestamp):02d}"
 
@@ -120,33 +115,13 @@ def cache_path_for(cache_dir, timestamp):
     )
 
 
-def heatmap_url_for(timestamp):
-    return (
-        "https://globe.adsbexchange.com/globe_history/"
-        f"{timestamp.year:04d}/{timestamp.month:02d}/{timestamp.day:02d}/heatmap/{slot_index_for(timestamp):02d}.bin.ttf"
-    )
-
-
 def download_heatmap(timestamp, destination, skip_download=False, timeout_seconds=120):
-    if destination.exists():
-        return True, True
-    if skip_download:
-        return False, False
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
-
-    request = urllib.request.Request(
-        heatmap_url_for(timestamp),
-        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://globe.adsbexchange.com/"},
+    return fetch_heatmap(
+        timestamp,
+        destination,
+        skip_download=skip_download,
+        timeout_seconds=timeout_seconds,
     )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            destination.write_bytes(response.read())
-        return True, False
-    except urllib.error.HTTPError as error:
-        if error.code == 404:
-            return False, False
-        raise
 
 
 def choose_latest_heatmap(now, lookback_slots, cache_dir=LIVE_CACHE_DIR, skip_download=False):
@@ -157,26 +132,28 @@ def choose_latest_heatmap(now, lookback_slots, cache_dir=LIVE_CACHE_DIR, skip_do
         candidate = latest_slot - dt.timedelta(minutes=30 * offset)
         cache_path = cache_path_for(cache_dir, candidate)
         try:
-            available, used_cache = download_heatmap(candidate, cache_path, skip_download)
+            result = download_heatmap(candidate, cache_path, skip_download)
         except Exception as error:  # pragma: no cover - defensive network handling
             last_error = error
             continue
 
-        if not available:
+        if not result.available:
             continue
 
         return {
             "slot": candidate,
             "slot_key": slot_key_for(candidate),
-            "url": heatmap_url_for(candidate),
+            "url": result.url or heatmap_url_for(candidate),
             "cache_path": cache_path,
-            "used_cache": used_cache,
+            "used_cache": result.used_cache,
+            "source": result.source,
+            "provider_label": result.provider_label,
         }
 
     if last_error:
         raise last_error
 
-    raise FileNotFoundError("No recent ADS-B Exchange heatmap file was available in the requested lookback window.")
+    raise FileNotFoundError("No recent ADS-B heatmap file was available in the requested lookback window.")
 
 
 def parse_latest_slice(cache_path):
@@ -223,20 +200,22 @@ def build_recent_slots(latest_slot, recent_slots=RECENT_WINDOW_SLOTS):
 def ensure_slot_heatmap(slot, cache_dir=LIVE_CACHE_DIR, skip_download=False):
     cache_path = cache_path_for(cache_dir, slot)
     try:
-        available, used_cache = download_heatmap(slot, cache_path, skip_download)
+        result = download_heatmap(slot, cache_path, skip_download)
     except Exception as error:  # pragma: no cover - defensive network handling
         # A slot that cannot be fetched now is retried by the next run instead of failing this one.
         print(f"Could not fetch {heatmap_url_for(slot)}: {error}", file=sys.stderr)
         return None
-    if not available:
+    if not result.available:
         return None
 
     return {
         "slot": slot,
         "slot_key": slot_key_for(slot),
-        "url": heatmap_url_for(slot),
+        "url": result.url or heatmap_url_for(slot),
         "cache_path": cache_path,
-        "used_cache": used_cache,
+        "used_cache": result.used_cache,
+        "source": result.source,
+        "provider_label": result.provider_label,
     }
 
 
@@ -504,7 +483,8 @@ def main():
             json.dumps(
                 {
                     "provider": SOURCE,
-                    "providerLabel": "ADS-B Exchange heatmap",
+                    "providerLabel": selected.get("provider_label") or "ADS-B heatmap",
+                    "source": selected.get("source"),
                     "cadenceMinutes": 30,
                     "refreshing": False,
                     "nextRefreshAt": None,

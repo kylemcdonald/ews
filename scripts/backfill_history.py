@@ -6,11 +6,9 @@ import json
 import pathlib
 import sqlite3
 import sys
-import time
-import urllib.error
-import urllib.request
 from parse_heatmap import parse_heatmap, str_to_point
 from db_migrations import migrate_schema
+from heatmap_source import fetch_heatmap, url_for as source_url_for
 
 
 ROOT_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -143,48 +141,20 @@ def cache_path_for(date_value, index):
 
 
 def heatmap_url_for(date_value, index):
-    return (
-        f"https://globe.adsbexchange.com/globe_history/"
-        f"{date_value.year:04d}/{date_value.month:02d}/{date_value.day:02d}/heatmap/{index:02d}.bin.ttf"
-    )
+    return source_url_for(date_value, "adsbx", index)
 
 
 def download_heatmap(date_value, index, destination, rate_limit_seconds, timeout_seconds=120, max_retries=4):
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists():
-        return True
-
-    request = urllib.request.Request(
-        heatmap_url_for(date_value, index),
-        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://globe.adsbexchange.com/"},
+    result = fetch_heatmap(
+        date_value,
+        destination,
+        timeout_seconds=timeout_seconds,
+        rate_limit_seconds=rate_limit_seconds,
+        max_retries=max_retries,
     )
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-                destination.write_bytes(response.read())
-            break
-        except urllib.error.HTTPError as error:
-            if error.code == 404:
-                return False
-            if attempt == max_retries:
-                print(
-                    f"Skipping {heatmap_url_for(date_value, index)} after {max_retries} HTTP failures: {error}",
-                    file=sys.stderr,
-                )
-                return None
-        except (TimeoutError, urllib.error.URLError, OSError) as error:
-            if attempt == max_retries:
-                print(
-                    f"Skipping {heatmap_url_for(date_value, index)} after {max_retries} download failures: {error}",
-                    file=sys.stderr,
-                )
-                return None
-
-        time.sleep(min(5, attempt))
-
-    time.sleep(rate_limit_seconds)
-    return True
+    if result.available:
+        return True
+    return False
 
 
 def ingest_metrics(connection, tracked_by_hex, start_date, end_date, skip_download, rate_limit_seconds, keep_cache):

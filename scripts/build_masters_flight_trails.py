@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from heatmap_source import fetch_heatmap, url_for as source_url_for
+
 
 ROOT_DIR = pathlib.Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
@@ -99,11 +101,7 @@ def heatmap_cache_path(timestamp):
 
 
 def heatmap_url(timestamp):
-    idx = slot_index_for(timestamp)
-    return (
-        "https://globe.adsbexchange.com/globe_history/"
-        f"{timestamp:%Y/%m/%d}/heatmap/{idx:02d}.bin.ttf"
-    )
+    return source_url_for(timestamp, "adsbx")
 
 
 def download_heatmap(timestamp):
@@ -111,14 +109,10 @@ def download_heatmap(timestamp):
     if destination.exists() and destination.stat().st_size > 0:
         return destination, True
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    request = urllib.request.Request(
-        heatmap_url(timestamp),
-        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://globe.adsbexchange.com/"},
-    )
-    with urllib.request.urlopen(request, timeout=180) as response:
-        destination.write_bytes(response.read())
-    return destination, False
+    result = fetch_heatmap(timestamp, destination, timeout_seconds=180)
+    if not result.available:
+        raise FileNotFoundError(f"Could not fetch heatmap for {timestamp.isoformat()}")
+    return destination, result.used_cache
 
 
 def iter_slots(start_utc, end_utc):

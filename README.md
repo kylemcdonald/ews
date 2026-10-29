@@ -103,8 +103,8 @@ npm run telegram:alert
 
 ## Notes
 
-- Historical ingestion uses ADS-B Exchange heatmap binaries from `globe_history`.
-- The current “live” view also comes from ADS-B Exchange heatmaps, updated every 30 minutes and cached between refreshes.
+- Historical ingestion uses ADS-B Exchange heatmap binaries from `globe_history`. Because ADS-B Exchange now gates direct history access behind a browser Turnstile session, downloads automatically fall back to the compatible public `globe.adsb.fi` heatmap mirror. Set `ADSBX_HEATMAP_SOURCE=adsbx` to require ADS-B Exchange or `ADSBX_HEATMAP_SOURCE=adsbfi` to skip it; leave it unset for automatic fallback.
+- The current “live” view also comes from these heatmaps, updated every 30 minutes and cached between refreshes.
 - The FAA importer uses a pragmatic business-jet heuristic so the tracked set excludes helicopters, props, large airliners, and government aircraft.
 - The global importer merges ADS-B Exchange and tar1090/Mictronics metadata into `aircraft_metadata`, classifies rows into broad categories such as `business_jet`, `large_airliner`, `regional_airliner`, `military`, and `non_jet_aircraft`, then adds only `business_jet` rows to the main tracked cohort.
 - The concurrent-count model uses an all-history weekly baseline and learned half-hour profiles around U.S. federal holidays, with a standard-deviation band exported for the dashboard.
