@@ -148,6 +148,7 @@ def fetch_heatmap(
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     rate_limit_seconds: float = 0.0,
     max_retries: int = DEFAULT_MAX_RETRIES,
+    index: int | None = None,
 ) -> HeatmapFetch:
     """Fetch one half-hour heatmap slice, falling back to adsb.fi when needed.
 
@@ -156,6 +157,7 @@ def fetch_heatmap(
     errors are retried before moving on.
     """
     destination = pathlib.Path(destination)
+    timestamp = coerce_timestamp(timestamp, index)
     if destination.exists() and looks_like_heatmap(destination):
         return HeatmapFetch(True, True, None, "cache")
     if skip_download:

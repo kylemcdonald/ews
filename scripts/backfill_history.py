@@ -151,6 +151,7 @@ def download_heatmap(date_value, index, destination, rate_limit_seconds, timeout
         timeout_seconds=timeout_seconds,
         rate_limit_seconds=rate_limit_seconds,
         max_retries=max_retries,
+        index=index,
     )
     if result.available:
         return True

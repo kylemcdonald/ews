@@ -144,11 +144,19 @@ def choose_latest_heatmap(cache_dir, lookback_slots, skip_download, rate_limit_s
     for offset in range(lookback_slots + 1):
         candidate = latest_slot - dt.timedelta(minutes=30 * offset)
         destination = cache_path_for(cache_dir, candidate.date(), slot_index_for(candidate))
+        result = None
         try:
             if skip_download:
                 available = destination.exists()
+                source = "cache"
+                provider_label = "cached heatmap"
+                used_cache = True
             else:
-                available = download_heatmap(candidate.date(), slot_index_for(candidate), destination, rate_limit_seconds)
+                result = download_heatmap(candidate.date(), slot_index_for(candidate), destination, rate_limit_seconds)
+                available = result.available
+                source = result.source
+                provider_label = result.provider_label
+                used_cache = result.used_cache
         except Exception as error:  # pragma: no cover - defensive network handling
             last_error = error
             continue
@@ -159,9 +167,11 @@ def choose_latest_heatmap(cache_dir, lookback_slots, skip_download, rate_limit_s
         return {
             "slot": candidate,
             "slot_key": f"{candidate.date().isoformat()}:{slot_index_for(candidate):02d}",
-            "url": heatmap_url_for(candidate.date(), slot_index_for(candidate)),
+            "url": (result.url if result and result.url else heatmap_url_for(candidate.date(), slot_index_for(candidate))),
             "cache_path": destination,
-            "used_cache": destination.exists(),
+            "used_cache": used_cache,
+            "source": source,
+            "provider_label": provider_label,
         }
 
     if last_error:
@@ -171,14 +181,14 @@ def choose_latest_heatmap(cache_dir, lookback_slots, skip_download, rate_limit_s
 
 
 def download_heatmap(date_value, index, destination, rate_limit_seconds, timeout_seconds=120, max_retries=4):
-    result = fetch_heatmap(
+    return fetch_heatmap(
         date_value,
         destination,
         timeout_seconds=timeout_seconds,
         rate_limit_seconds=rate_limit_seconds,
         max_retries=max_retries,
+        index=index,
     )
-    return True if result.available else False
 
 
 def point_to_non_icao_hex(point0_u):
@@ -470,7 +480,7 @@ def fill_recent_slots(connection, cache_dir, latest_slot, recent_slots, skip_dow
         if skip_download:
             available = destination.exists()
         else:
-            available = download_heatmap(slot.date(), slot_index_for(slot), destination, rate_limit_seconds)
+            available = download_heatmap(slot.date(), slot_index_for(slot), destination, rate_limit_seconds).available
         if not available:
             continue
 
@@ -695,7 +705,7 @@ def parse_latest_non_icao_snapshot(cache_path):
     return latest_sampled_at.isoformat(), peak_rows
 
 
-def replace_live_snapshot(connection, cache_path):
+def replace_live_snapshot(connection, cache_path, selected=None):
     sampled_at_iso, snapshot_rows = parse_latest_non_icao_snapshot(cache_path)
     if sampled_at_iso is None:
         return None
@@ -736,9 +746,12 @@ def replace_live_snapshot(connection, cache_path):
     set_meta(connection, "cohort_source", "non_icao_untracked")
     set_meta(connection, "adsbx_heatmap_sampled_at", sampled_at_iso)
     set_meta(connection, "adsbx_heatmap_cache_path", str(cache_path))
+    if selected and selected.get("url"):
+        set_meta(connection, "adsbx_heatmap_url", selected["url"])
     set_meta(connection, "adsbx_heatmap_status", json.dumps({
         "provider": "adsbx_heatmap",
-        "providerLabel": "ADS-B Exchange heatmap",
+        "providerLabel": (selected or {}).get("provider_label") or "ADS-B heatmap",
+        "source": (selected or {}).get("source"),
         "cadenceMinutes": 30,
         "refreshing": False,
         "nextRefreshAt": None,
@@ -784,7 +797,7 @@ def scan_range(
             processed_files += 1
             destination = cache_path_for(cache_dir, date_value, index)
             if not skip_download:
-                available = download_heatmap(date_value, index, destination, rate_limit_seconds)
+                available = download_heatmap(date_value, index, destination, rate_limit_seconds).available
                 if not available:
                     continue
             elif not destination.exists():
@@ -866,7 +879,7 @@ def main():
                 metrics_only=True,
                 write_concurrent_metrics=True,
             )
-            live_snapshot = replace_live_snapshot(connection, selected["cache_path"])
+            live_snapshot = replace_live_snapshot(connection, selected["cache_path"], selected)
             filled_slot_count = fill_recent_slots(
                 connection,
                 cache_dir,
